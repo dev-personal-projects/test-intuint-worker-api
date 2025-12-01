@@ -1,7 +1,18 @@
 #!/bin/bash
-# Comprehensive invoice creation example for Shipht It Company
-# Usage: ./test-curl.sh
-# Note: Update companyId, CustomerRef, and ItemRef values based on your QuickBooks setup
+# Comprehensive invoice creation example
+# Usage: ./scripts/create-invoice.sh [customerName] [companyId]
+# Example: ./scripts/create-invoice.sh "Shipht It Company" 9341455793300229
+# Note: If customer doesn't exist, it will be created automatically
+#       Update ItemRef values based on your QuickBooks setup
+
+# Configuration - Update these values based on your QuickBooks setup
+DEFAULT_COMPANY_ID="9341455793300229"
+DEFAULT_CUSTOMER_NAME="Shipht It Company"
+BASE_URL="http://localhost:5000"
+
+# Get parameters or use defaults
+CUSTOMER_NAME="${1:-$DEFAULT_CUSTOMER_NAME}"
+COMPANY_ID="${2:-$DEFAULT_COMPANY_ID}"
 
 # Get today's date and calculate due date (30 days from today)
 TXN_DATE=$(date +%Y-%m-%d)
@@ -15,17 +26,26 @@ else
   DUE_DATE=$(date +%Y-%m-%d)
 fi
 
-curl -X POST "http://localhost:5000/api/invoices?companyId=9341455793300229" \
+echo "=========================================="
+echo "Creating Invoice"
+echo "=========================================="
+echo "Customer Name: $CUSTOMER_NAME"
+echo "Company ID: $COMPANY_ID"
+echo "Transaction Date: ${TXN_DATE}"
+echo "Due Date: ${DUE_DATE}"
+echo ""
+echo "Note: If customer '$CUSTOMER_NAME' doesn't exist, it will be created automatically"
+echo ""
+
+curl -X POST "http://localhost:5000/api/invoices?companyId=${COMPANY_ID}&customerName=$(echo "$CUSTOMER_NAME" | sed 's/ /%20/g')" \
   -H "Content-Type: application/json" \
   -d "{
-    \"CustomerRef\": { \"value\": \"1\", \"name\": \"Shipht It Company\" },
     \"DocNumber\": \"INV-$(date +%Y%m%d)-001\",
     \"TxnDate\": \"${TXN_DATE}\",
     \"DueDate\": \"${DUE_DATE}\",
     \"Line\": [
       {
         \"DetailType\": \"SalesItemLineDetail\",
-        \"Amount\": 5000.00,
         \"Description\": \"Custom Software Development - E-commerce Platform Module\",
         \"SalesItemLineDetail\": {
           \"ItemRef\": { \"value\": \"2\", \"name\": \"Software Development\" },
@@ -35,7 +55,6 @@ curl -X POST "http://localhost:5000/api/invoices?companyId=9341455793300229" \
       },
       {
         \"DetailType\": \"SalesItemLineDetail\",
-        \"Amount\": 1200.00,
         \"Description\": \"Cloud Hosting & Infrastructure Setup - AWS/Azure Configuration\",
         \"SalesItemLineDetail\": {
           \"ItemRef\": { \"value\": \"3\", \"name\": \"Cloud Hosting\" },
@@ -45,7 +64,6 @@ curl -X POST "http://localhost:5000/api/invoices?companyId=9341455793300229" \
       },
       {
         \"DetailType\": \"SalesItemLineDetail\",
-        \"Amount\": 2500.00,
         \"Description\": \"API Integration Services - Payment Gateway & Shipping APIs\",
         \"SalesItemLineDetail\": {
           \"ItemRef\": { \"value\": \"4\", \"name\": \"API Integration\" },
@@ -55,7 +73,6 @@ curl -X POST "http://localhost:5000/api/invoices?companyId=9341455793300229" \
       },
       {
         \"DetailType\": \"SalesItemLineDetail\",
-        \"Amount\": 1800.00,
         \"Description\": \"Technical Consulting - Architecture Review & Optimization\",
         \"SalesItemLineDetail\": {
           \"ItemRef\": { \"value\": \"5\", \"name\": \"Technical Consulting\" },
@@ -65,7 +82,6 @@ curl -X POST "http://localhost:5000/api/invoices?companyId=9341455793300229" \
       },
       {
         \"DetailType\": \"SalesItemLineDetail\",
-        \"Amount\": 900.00,
         \"Description\": \"Database Design & Migration Services\",
         \"SalesItemLineDetail\": {
           \"ItemRef\": { \"value\": \"6\", \"name\": \"Database Services\" },
@@ -75,7 +91,6 @@ curl -X POST "http://localhost:5000/api/invoices?companyId=9341455793300229" \
       },
       {
         \"DetailType\": \"SalesItemLineDetail\",
-        \"Amount\": 600.00,
         \"Description\": \"Security Audit & Penetration Testing\",
         \"SalesItemLineDetail\": {
           \"ItemRef\": { \"value\": \"7\", \"name\": \"Security Services\" },
@@ -85,7 +100,6 @@ curl -X POST "http://localhost:5000/api/invoices?companyId=9341455793300229" \
       },
       {
         \"DetailType\": \"SalesItemLineDetail\",
-        \"Amount\": 1500.00,
         \"Description\": \"DevOps Setup - CI/CD Pipeline Configuration\",
         \"SalesItemLineDetail\": {
           \"ItemRef\": { \"value\": \"8\", \"name\": \"DevOps Services\" },
@@ -95,7 +109,6 @@ curl -X POST "http://localhost:5000/api/invoices?companyId=9341455793300229" \
       },
       {
         \"DetailType\": \"SalesItemLineDetail\",
-        \"Amount\": 800.00,
         \"Description\": \"Mobile App Development - iOS & Android Native Apps\",
         \"SalesItemLineDetail\": {
           \"ItemRef\": { \"value\": \"9\", \"name\": \"Mobile Development\" },
@@ -105,7 +118,6 @@ curl -X POST "http://localhost:5000/api/invoices?companyId=9341455793300229" \
       },
       {
         \"DetailType\": \"SalesItemLineDetail\",
-        \"Amount\": 450.00,
         \"Description\": \"UI/UX Design Services - User Interface & Experience Design\",
         \"SalesItemLineDetail\": {
           \"ItemRef\": { \"value\": \"10\", \"name\": \"Design Services\" },
@@ -115,7 +127,6 @@ curl -X POST "http://localhost:5000/api/invoices?companyId=9341455793300229" \
       },
       {
         \"DetailType\": \"SalesItemLineDetail\",
-        \"Amount\": 1200.00,
         \"Description\": \"Maintenance & Support Package - Monthly Retainer (3 months)\",
         \"SalesItemLineDetail\": {
           \"ItemRef\": { \"value\": \"11\", \"name\": \"Maintenance & Support\" },
@@ -125,7 +136,6 @@ curl -X POST "http://localhost:5000/api/invoices?companyId=9341455793300229" \
       },
       {
         \"DetailType\": \"SalesItemLineDetail\",
-        \"Amount\": 750.00,
         \"Description\": \"Training & Documentation - Team Training Sessions\",
         \"SalesItemLineDetail\": {
           \"ItemRef\": { \"value\": \"12\", \"name\": \"Training Services\" },
@@ -135,7 +145,6 @@ curl -X POST "http://localhost:5000/api/invoices?companyId=9341455793300229" \
       },
       {
         \"DetailType\": \"SalesItemLineDetail\",
-        \"Amount\": 300.00,
         \"Description\": \"Performance Optimization - Code Review & Refactoring\",
         \"SalesItemLineDetail\": {
           \"ItemRef\": { \"value\": \"13\", \"name\": \"Optimization Services\" },
@@ -147,8 +156,28 @@ curl -X POST "http://localhost:5000/api/invoices?companyId=9341455793300229" \
   }"
 
 echo ""
-echo "Invoice created for Shipht It Company"
-echo "Total Amount: \$17,000.00"
+echo "=========================================="
+echo "Invoice Creation Summary"
+echo "=========================================="
+echo "Customer: $CUSTOMER_NAME"
 echo "Transaction Date: ${TXN_DATE}"
 echo "Due Date: ${DUE_DATE}"
+echo ""
+echo "Line Items:"
+echo "  - Custom Software Development: 40 hrs × \$125.00 = \$5,000.00"
+echo "  - Cloud Hosting Setup: 1 × \$1,200.00 = \$1,200.00"
+echo "  - API Integration: 25 hrs × \$100.00 = \$2,500.00"
+echo "  - Technical Consulting: 12 hrs × \$150.00 = \$1,800.00"
+echo "  - Database Services: 6 hrs × \$150.00 = \$900.00"
+echo "  - Security Audit: 1 × \$600.00 = \$600.00"
+echo "  - DevOps Setup: 10 hrs × \$150.00 = \$1,500.00"
+echo "  - Mobile Development: 8 hrs × \$100.00 = \$800.00"
+echo "  - UI/UX Design: 15 hrs × \$30.00 = \$450.00"
+echo "  - Maintenance & Support: 3 months × \$400.00 = \$1,200.00"
+echo "  - Training: 5 hrs × \$150.00 = \$750.00"
+echo "  - Performance Optimization: 2 hrs × \$150.00 = \$300.00"
+echo ""
+echo "Expected Total: \$17,000.00"
+echo ""
+echo "Note: Amounts are calculated automatically by QuickBooks from UnitPrice × Qty"
 

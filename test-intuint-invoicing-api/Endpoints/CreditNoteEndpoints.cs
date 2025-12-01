@@ -54,20 +54,42 @@ public static class CreditNoteEndpoints
 
             logger.LogInformation("Invoice found. Total: {TotalAmt}, creating credit memo...", invoice.TotalAmt);
 
-            // Create credit memo request matching the invoice but with negative amounts
-            // This effectively cancels the invoice
+            // Create credit memo request matching the invoice
+            // QuickBooks credit memos use positive amounts - they're automatically treated as credits
+            // QuickBooks requires all amounts to be positive (0 or greater)
+            // Credit memos are automatically treated as credits by QuickBooks
+            // We use the same positive amounts as the invoice - QuickBooks handles the credit nature
             var creditMemoRequest = new CreditMemoRequest
             {
                 CustomerRef = invoice.CustomerRef,
                 TxnDate = DateTime.Now.ToString("yyyy-MM-dd"),
-                Line = invoice.Line?.Select(line => new LineItem
-                {
-                    DetailType = line.DetailType,
-                    Amount = line.Amount.HasValue ? -line.Amount.Value : null,
-                    Description = line.Description,
-                    SalesItemLineDetail = line.SalesItemLineDetail
-                }).ToList()
+                Line = invoice.Line?.Where(line => line.DetailType == "SalesItemLineDetail" && line.SalesItemLineDetail != null)
+                    .Select(line =>
+                    {
+                        // Calculate Amount = UnitPrice * Qty (both positive - QuickBooks treats credit memos as credits)
+                        var unitPrice = line.SalesItemLineDetail!.UnitPrice ?? 0;
+                        var qty = line.SalesItemLineDetail.Qty ?? 0;
+                        var amount = unitPrice * qty;
+                        
+                        return new LineItem
+                        {
+                            DetailType = line.DetailType,
+                            // Amount is required by QuickBooks - calculate from UnitPrice * Qty
+                            Amount = amount > 0 ? amount : null,
+                            Description = line.Description,
+                            SalesItemLineDetail = new SalesItemLineDetail
+                            {
+                                ItemRef = line.SalesItemLineDetail.ItemRef,
+                                Qty = line.SalesItemLineDetail.Qty,
+                                UnitPrice = line.SalesItemLineDetail.UnitPrice
+                            }
+                        };
+                    }).ToList()
             };
+
+            // Log credit memo request details for debugging
+            logger.LogInformation("Creating credit memo with {LineCount} line items for customer {CustomerId}", 
+                creditMemoRequest.Line?.Count ?? 0, creditMemoRequest.CustomerRef?.Value);
 
             // Create credit memo in QuickBooks
             var creditMemo = await qbClient.CreateCreditMemoAsync(companyId, tokens.AccessToken, creditMemoRequest);

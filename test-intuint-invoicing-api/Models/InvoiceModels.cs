@@ -88,6 +88,12 @@ public class QuickBooksResponse<T>
     [JsonPropertyName("CreditMemo")]
     public T? CreditMemo { get; set; }
 
+    [JsonPropertyName("Payment")]
+    public T? Payment { get; set; }
+
+    [JsonPropertyName("Customer")]
+    public T? Customer { get; set; }
+
     [JsonPropertyName("Fault")]
     public Fault? Fault { get; set; }
 }
@@ -100,6 +106,9 @@ public class QueryResponse<T>
 
     [JsonPropertyName("CreditMemo")]
     public List<T>? CreditMemo { get; set; }
+
+    [JsonPropertyName("Customer")]
+    public List<T>? Customer { get; set; }
 
     [JsonPropertyName("maxResults")]
     public int? MaxResults { get; set; }
@@ -185,5 +194,118 @@ public class CreditMemoEntity
 
     [JsonPropertyName("TxnDate")]
     public string? TxnDate { get; set; }
+}
+
+// Structured response model for invoice list with metadata and summary
+public class InvoiceListResponse
+{
+    [JsonPropertyName("invoices")]
+    public List<InvoiceEntity> Invoices { get; set; } = new();
+
+    [JsonPropertyName("count")]
+    public int Count { get; set; }
+
+    [JsonPropertyName("summary")]
+    public InvoiceSummary Summary { get; set; } = new();
+}
+
+// Summary statistics for invoice list
+public class InvoiceSummary
+{
+    [JsonPropertyName("totalAmount")]
+    public decimal TotalAmount { get; set; }
+
+    [JsonPropertyName("totalBalance")]
+    public decimal TotalBalance { get; set; }
+
+    [JsonPropertyName("paidAmount")]
+    public decimal PaidAmount { get; set; }
+
+    [JsonPropertyName("paidCount")]
+    public int PaidCount { get; set; }
+
+    [JsonPropertyName("unpaidCount")]
+    public int UnpaidCount { get; set; }
+}
+
+// Request model for creating a payment to settle an invoice
+public class PaymentRequest
+{
+    [JsonPropertyName("CustomerRef")]
+    public Reference? CustomerRef { get; set; }
+
+    [JsonPropertyName("TotalAmt")]
+    public decimal TotalAmt { get; set; }
+
+    [JsonPropertyName("TxnDate")]
+    public string? TxnDate { get; set; }
+
+    [JsonPropertyName("Line")]
+    public List<PaymentLine>? Line { get; set; }
+}
+
+// Payment line item for applying payment to invoice
+public class PaymentLine
+{
+    [JsonPropertyName("Amount")]
+    public decimal Amount { get; set; }
+
+    [JsonPropertyName("LinkedTxn")]
+    public List<LinkedTransaction>? LinkedTxn { get; set; }
+}
+
+// Linked transaction reference for payment application
+public class LinkedTransaction
+{
+    [JsonPropertyName("TxnId")]
+    public string? TxnId { get; set; }
+
+    [JsonPropertyName("TxnType")]
+    public string? TxnType { get; set; }
+}
+
+// Payment entity returned from QuickBooks API
+public class PaymentEntity
+{
+    [JsonPropertyName("Id")]
+    public string? Id { get; set; }
+
+    [JsonPropertyName("SyncToken")]
+    public string? SyncToken { get; set; }
+
+    [JsonPropertyName("CustomerRef")]
+    public Reference? CustomerRef { get; set; }
+
+    [JsonPropertyName("TotalAmt")]
+    public decimal? TotalAmt { get; set; }
+
+    [JsonPropertyName("TxnDate")]
+    public string? TxnDate { get; set; }
+}
+
+// Request model for creating a customer in QuickBooks
+public class CustomerRequest
+{
+    [JsonPropertyName("DisplayName")]
+    public string DisplayName { get; set; } = string.Empty;
+
+    [JsonPropertyName("CompanyName")]
+    public string? CompanyName { get; set; }
+}
+
+// Customer entity returned from QuickBooks API
+public class CustomerEntity
+{
+    [JsonPropertyName("Id")]
+    public string? Id { get; set; }
+
+    [JsonPropertyName("SyncToken")]
+    public string? SyncToken { get; set; }
+
+    [JsonPropertyName("DisplayName")]
+    public string? DisplayName { get; set; }
+
+    [JsonPropertyName("CompanyName")]
+    public string? CompanyName { get; set; }
 }
 

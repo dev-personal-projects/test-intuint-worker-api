@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using test_intuint_invoicing_api.Models;
 using test_intuint_invoicing_api.Services;
@@ -17,11 +19,26 @@ public static class InvoiceEndpoints
             .Produces<ApiResponse<object>>(401)
             .DisableAntiforgery();
 
+        app.MapGet("/api/invoices", GetAllInvoices)
+            .WithName("GetAllInvoices")
+            .WithTags("Invoices")
+            .Produces<ApiResponse<InvoiceListResponse>>(200)
+            .Produces<ApiResponse<object>>(401);
+
         app.MapGet("/api/invoices/{invoiceId}", GetInvoice)
             .WithName("GetInvoice")
             .WithTags("Invoices")
             .Produces<ApiResponse<InvoiceEntity>>(200)
             .Produces<ApiResponse<object>>(404);
+
+        app.MapPost("/api/invoices/{invoiceId}/payment", ApplyPayment)
+            .WithName("ApplyPayment")
+            .WithTags("Invoices")
+            .Accepts<PaymentRequest>("application/json")
+            .Produces<ApiResponse<PaymentEntity>>(201)
+            .Produces<ApiResponse<object>>(400)
+            .Produces<ApiResponse<object>>(401)
+            .DisableAntiforgery();
     }
 
     private static async Task<IResult> CreateInvoice(
@@ -29,9 +46,10 @@ public static class InvoiceEndpoints
         IIntuitOAuthService oauthService,
         ILogger<Program> logger,
         [FromBody] InvoiceRequest? request,
-        [FromQuery] string companyId)
+        [FromQuery] string companyId,
+        [FromQuery] string? customerName = null)
     {
-        logger.LogInformation("CreateInvoice called with companyId: {CompanyId}", companyId);
+        logger.LogInformation("CreateInvoice called with companyId: {CompanyId}, customerName: {CustomerName}", companyId, customerName);
         
         // Validate request body
         if (request == null)
@@ -39,9 +57,6 @@ public static class InvoiceEndpoints
             logger.LogWarning("CreateInvoice failed: Request body is null");
             return Results.BadRequest(ApiResponse<object>.Fail("Request body is required and must be valid JSON"));
         }
-        
-        logger.LogInformation("Invoice request received - CustomerRef: {CustomerRef}, Lines: {LineCount}", 
-            request.CustomerRef?.Value, request.Line?.Count ?? 0);
         
         // Validate company ID is provided
         if (string.IsNullOrEmpty(companyId))
@@ -61,12 +76,109 @@ public static class InvoiceEndpoints
                 statusCode: 401);
         }
 
-        logger.LogInformation("OAuth tokens found for companyId: {CompanyId}, creating invoice...", companyId);
-
         try
         {
+            // Handle customer name - create or find customer if name is provided
+            if (!string.IsNullOrWhiteSpace(customerName))
+            {
+                logger.LogInformation("Customer name provided: {CustomerName}, looking up or creating customer...", customerName);
+                
+                // Try to find existing customer by name
+                var existingCustomer = await qbClient.FindCustomerByNameAsync(companyId, tokens.AccessToken, customerName);
+                
+                if (existingCustomer != null)
+                {
+                    logger.LogInformation("Found existing customer: {CustomerId} - {CustomerName}", existingCustomer.Id, existingCustomer.DisplayName);
+                    request.CustomerRef = new Reference
+                    {
+                        Value = existingCustomer.Id,
+                        Name = existingCustomer.DisplayName
+                    };
+                }
+                else
+                {
+                    // Create new customer
+                    logger.LogInformation("Customer not found, creating new customer: {CustomerName}", customerName);
+                    var newCustomer = await qbClient.CreateCustomerAsync(companyId, tokens.AccessToken, new CustomerRequest
+                    {
+                        DisplayName = customerName,
+                        CompanyName = customerName
+                    });
+                    
+                    if (newCustomer == null)
+                    {
+                        logger.LogError("Failed to create customer: {CustomerName}", customerName);
+                        return Results.BadRequest(ApiResponse<object>.Fail($"Failed to create customer: {customerName}"));
+                    }
+                    
+                    logger.LogInformation("Customer created successfully: {CustomerId} - {CustomerName}", newCustomer.Id, newCustomer.DisplayName);
+                    request.CustomerRef = new Reference
+                    {
+                        Value = newCustomer.Id,
+                        Name = newCustomer.DisplayName
+                    };
+                }
+            }
+            
+            // Validate customer reference is set
+            if (request.CustomerRef == null || string.IsNullOrEmpty(request.CustomerRef.Value))
+            {
+                logger.LogWarning("CreateInvoice failed: CustomerRef is required");
+                return Results.BadRequest(ApiResponse<object>.Fail("CustomerRef is required. Provide either CustomerRef in request body or customerName query parameter"));
+            }
+
+            // Calculate Amount for each line item if not provided (Amount = UnitPrice * Qty)
+            // QuickBooks requires Amount field for all SalesItemLineDetail lines
+            if (request.Line != null)
+            {
+                foreach (var line in request.Line)
+                {
+                    // Only calculate for SalesItemLineDetail lines
+                    if (line.DetailType == "SalesItemLineDetail" && 
+                        line.SalesItemLineDetail != null && 
+                        line.SalesItemLineDetail.UnitPrice.HasValue && 
+                        line.SalesItemLineDetail.Qty.HasValue)
+                    {
+                        // Always calculate and set Amount (required by QuickBooks)
+                        // This ensures Amount = UnitPrice * Qty validation passes
+                        var calculatedAmount = line.SalesItemLineDetail.UnitPrice.Value * line.SalesItemLineDetail.Qty.Value;
+                        line.Amount = calculatedAmount;
+                        logger.LogInformation("Calculated Amount: {Amount} = UnitPrice: {UnitPrice} × Qty: {Qty} for line: {Description}", 
+                            line.Amount, line.SalesItemLineDetail.UnitPrice.Value, line.SalesItemLineDetail.Qty.Value, line.Description ?? "N/A");
+                    }
+                }
+            }
+
+            logger.LogInformation("Invoice request - CustomerRef: {CustomerRef}, Lines: {LineCount}", 
+                request.CustomerRef.Value, request.Line?.Count ?? 0);
+
+            // Check for duplicate invoice (idempotency check)
+            logger.LogInformation("Checking for duplicate invoice with same customer, DocNumber, and TxnDate...");
+            var duplicateInvoice = await qbClient.FindDuplicateInvoiceAsync(companyId, tokens.AccessToken, request, request.CustomerRef.Value);
+            
+            if (duplicateInvoice != null)
+            {
+                var duplicateCustomerName = request.CustomerRef.Name ?? "Unknown";
+                var docNumber = duplicateInvoice.DocNumber ?? "N/A";
+                var txnDate = duplicateInvoice.TxnDate ?? "N/A";
+                
+                logger.LogWarning("Duplicate invoice found. Invoice ID: {InvoiceId}, DocNumber: {DocNumber}, Customer: {CustomerName}", 
+                    duplicateInvoice.Id, docNumber, duplicateCustomerName);
+                
+                var message = $"Invoice for customer '{duplicateCustomerName}' already exists with the same details (DocNumber: {docNumber}, Date: {txnDate}). Invoice ID: {duplicateInvoice.Id}";
+                
+                return Results.Json(
+                    new ApiResponse<InvoiceEntity>
+                    {
+                        Success = true,
+                        Data = duplicateInvoice,
+                        Message = message
+                    },
+                    statusCode: 200);
+            }
+
             // Create invoice in QuickBooks using the API client
-            logger.LogInformation("Calling QuickBooks API to create invoice for companyId: {CompanyId}", companyId);
+            logger.LogInformation("No duplicate found. Calling QuickBooks API to create invoice for companyId: {CompanyId}", companyId);
             var invoice = await qbClient.CreateInvoiceAsync(companyId, tokens.AccessToken, request);
             if (invoice == null)
             {
@@ -117,6 +229,185 @@ public static class InvoiceEndpoints
 
         logger.LogInformation("Invoice retrieved successfully: {InvoiceId}", invoiceId);
         return Results.Ok(ApiResponse<InvoiceEntity>.Ok(invoice));
+    }
+
+    private static async Task<IResult> GetAllInvoices(
+        IQuickBooksApiClient qbClient,
+        IIntuitOAuthService oauthService,
+        ILogger<Program> logger,
+        [FromQuery] string companyId,
+        [FromQuery] int? maxResults = null)
+    {
+        logger.LogInformation("GetAllInvoices called for companyId: {CompanyId}, maxResults: {MaxResults}", companyId, maxResults);
+        
+        // Validate company ID is provided
+        if (string.IsNullOrEmpty(companyId))
+            return Results.BadRequest(ApiResponse<object>.Fail("companyId is required"));
+
+        // Retrieve stored OAuth tokens for this company, auto-refresh if expired
+        var tokens = await oauthService.GetOrRefreshTokensAsync(companyId);
+        if (tokens == null || string.IsNullOrEmpty(tokens.AccessToken))
+        {
+            logger.LogWarning("GetAllInvoices failed: No OAuth tokens found for companyId: {CompanyId}", companyId);
+            return Results.Json(
+                ApiResponse<object>.Fail($"No OAuth tokens found for companyId: {companyId}. Please complete OAuth authorization first by visiting: /auth/authorize"),
+                statusCode: 401);
+        }
+
+        try
+        {
+            // Fetch all invoices from QuickBooks using Query API
+            logger.LogInformation("Calling QuickBooks API to get all invoices for companyId: {CompanyId}", companyId);
+            var invoices = await qbClient.GetAllInvoicesAsync(companyId, tokens.AccessToken, maxResults);
+            
+            // Calculate summary statistics
+            var totalAmount = invoices.Sum(i => i.TotalAmt ?? 0);
+            var totalBalance = invoices.Sum(i => i.Balance ?? 0);
+            var paidAmount = totalAmount - totalBalance;
+            var paidCount = invoices.Count(i => (i.Balance ?? 0) == 0);
+            var unpaidCount = invoices.Count - paidCount;
+            
+            // Create structured response with metadata
+            var response = new InvoiceListResponse
+            {
+                Invoices = invoices,
+                Count = invoices.Count,
+                Summary = new InvoiceSummary
+                {
+                    TotalAmount = totalAmount,
+                    TotalBalance = totalBalance,
+                    PaidAmount = paidAmount,
+                    PaidCount = paidCount,
+                    UnpaidCount = unpaidCount
+                }
+            };
+            
+            logger.LogInformation("Retrieved {Count} invoices for companyId: {CompanyId}, Total Amount: {TotalAmount}, Total Balance: {TotalBalance}", 
+                invoices.Count, companyId, totalAmount, totalBalance);
+            
+            // Return formatted response with pretty-printed JSON
+            return Results.Json(ApiResponse<InvoiceListResponse>.Ok(response), 
+                options: new JsonSerializerOptions 
+                { 
+                    WriteIndented = true,
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+                });
+        }
+        catch (Exception ex)
+        {
+            // Return error if QuickBooks API call fails
+            logger.LogError(ex, "GetAllInvoices failed with exception for companyId: {CompanyId}", companyId);
+            return Results.BadRequest(ApiResponse<object>.Fail(ex.Message));
+        }
+    }
+
+    private static async Task<IResult> ApplyPayment(
+        IQuickBooksApiClient qbClient,
+        IIntuitOAuthService oauthService,
+        ILogger<Program> logger,
+        string invoiceId,
+        [FromBody] PaymentRequest? request,
+        [FromQuery] string companyId)
+    {
+        logger.LogInformation("ApplyPayment called for invoiceId: {InvoiceId}, companyId: {CompanyId}", invoiceId, companyId);
+        
+        // Validate request body
+        if (request == null || request.TotalAmt <= 0)
+        {
+            logger.LogWarning("ApplyPayment failed: Invalid payment amount");
+            return Results.BadRequest(ApiResponse<object>.Fail("Payment amount must be greater than 0"));
+        }
+
+        // Validate company ID is provided
+        if (string.IsNullOrEmpty(companyId))
+            return Results.BadRequest(ApiResponse<object>.Fail("companyId is required"));
+
+        // Retrieve stored OAuth tokens for this company, auto-refresh if expired
+        var tokens = await oauthService.GetOrRefreshTokensAsync(companyId);
+        if (tokens == null || string.IsNullOrEmpty(tokens.AccessToken))
+        {
+            logger.LogWarning("ApplyPayment failed: No OAuth tokens found for companyId: {CompanyId}", companyId);
+            return Results.Json(
+                ApiResponse<object>.Fail($"No OAuth tokens found for companyId: {companyId}. Please complete OAuth authorization first by visiting: /auth/authorize"),
+                statusCode: 401);
+        }
+
+        try
+        {
+            // Fetch the invoice to get customer reference and current balance
+            logger.LogInformation("Fetching invoice {InvoiceId} to get customer details...", invoiceId);
+            var invoice = await qbClient.GetInvoiceAsync(companyId, tokens.AccessToken, invoiceId);
+            if (invoice == null)
+            {
+                logger.LogWarning("Invoice not found: {InvoiceId}", invoiceId);
+                return Results.NotFound(ApiResponse<object>.Fail("Invoice not found"));
+            }
+
+            var currentBalance = invoice.Balance ?? 0;
+            var paymentAmount = request.TotalAmt;
+
+            // Validate payment amount doesn't exceed balance
+            if (paymentAmount > currentBalance)
+            {
+                logger.LogWarning("Payment amount {PaymentAmount} exceeds invoice balance {Balance}", paymentAmount, currentBalance);
+                return Results.BadRequest(ApiResponse<object>.Fail($"Payment amount (${paymentAmount}) cannot exceed invoice balance (${currentBalance})"));
+            }
+
+            logger.LogInformation("Invoice balance: {Balance}, Payment amount: {PaymentAmount}", currentBalance, paymentAmount);
+
+            // Create payment request with invoice reference
+            var paymentRequest = new PaymentRequest
+            {
+                CustomerRef = invoice.CustomerRef,
+                TotalAmt = paymentAmount,
+                TxnDate = request.TxnDate ?? DateTime.Now.ToString("yyyy-MM-dd"),
+                Line = new List<PaymentLine>
+                {
+                    new PaymentLine
+                    {
+                        Amount = paymentAmount,
+                        LinkedTxn = new List<LinkedTransaction>
+                        {
+                            new LinkedTransaction
+                            {
+                                TxnId = invoiceId,
+                                TxnType = "Invoice"
+                            }
+                        }
+                    }
+                }
+            };
+
+            // Create payment in QuickBooks
+            logger.LogInformation("Creating payment of ${PaymentAmount} for invoice {InvoiceId}...", paymentAmount, invoiceId);
+            var payment = await qbClient.CreatePaymentAsync(companyId, tokens.AccessToken, paymentRequest);
+            if (payment == null)
+            {
+                logger.LogError("Failed to create payment for invoice: {InvoiceId}", invoiceId);
+                return Results.BadRequest(ApiResponse<object>.Fail("Failed to create payment"));
+            }
+
+            logger.LogInformation("Payment created successfully. Payment ID: {PaymentId}, Amount: {Amount}", payment.Id, payment.TotalAmt);
+
+            // Fetch updated invoice to show new balance
+            await Task.Delay(500); // Brief delay for QuickBooks to process
+            var updatedInvoice = await qbClient.GetInvoiceAsync(companyId, tokens.AccessToken, invoiceId);
+            var newBalance = updatedInvoice?.Balance ?? currentBalance;
+            var isPaid = newBalance <= 0.01m;
+
+            logger.LogInformation("Invoice {InvoiceId} updated. New balance: {NewBalance}, Status: {Status}", 
+                invoiceId, newBalance, isPaid ? "PAID" : "PARTIALLY PAID");
+
+            // Return payment with invoice status
+            return Results.Created($"/api/invoices/{invoiceId}/payment/{payment.Id}", 
+                ApiResponse<PaymentEntity>.Ok(payment));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "ApplyPayment failed with exception for invoiceId: {InvoiceId}", invoiceId);
+            return Results.BadRequest(ApiResponse<object>.Fail(ex.Message));
+        }
     }
 }
 

@@ -1,8 +1,18 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using test_intuint_invoicing_api.Endpoints;
 using test_intuint_invoicing_api.Models;
 using test_intuint_invoicing_api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Configure JSON serialization to be pretty-printed and use camelCase
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.WriteIndented = true;
+    options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+    options.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+});
 
 builder.Services.AddOpenApi();
 builder.Services.AddEndpointsApiExplorer();
