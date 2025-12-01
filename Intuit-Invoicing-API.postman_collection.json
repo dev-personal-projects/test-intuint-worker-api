@@ -1,0 +1,552 @@
+{
+    "info": {
+        "name": "Intuit Invoicing API",
+        "description": "Complete Postman collection for testing Intuit Invoice and Credit Note API with proper payloads and examples.\n\n## Setup Instructions:\n1. Import this collection into Postman\n2. Create an environment (or use the default) and set these variables:\n   - `baseUrl`: `http://localhost:5000`\n   - `companyId`: Your realmId from OAuth callback (e.g., `9341455793300229`)\n   - `invoiceId`: Leave empty, will be set after creating an invoice\n   - `creditNoteId`: Leave empty, will be set after creating a credit note\n3. Complete OAuth flow first by opening `/auth/authorize` in browser\n4. Copy the `realmId` from callback URL and set it as `companyId` variable",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+        "_postman_id": "intuit-invoicing-api-001"
+    },
+    "item": [
+        {
+            "name": "Health Check",
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test(\"Status code is 200\", function () {",
+                            "    pm.response.to.have.status(200);",
+                            "});",
+                            "",
+                            "pm.test(\"Response has success field\", function () {",
+                            "    var jsonData = pm.response.json();",
+                            "    pm.expect(jsonData).to.have.property('success');",
+                            "});"
+                        ],
+                        "type": "text/javascript"
+                    }
+                }
+            ],
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{baseUrl}}/health",
+                    "host": [
+                        "{{baseUrl}}"
+                    ],
+                    "path": [
+                        "health"
+                    ]
+                },
+                "description": "Check if the API is running and healthy."
+            },
+            "response": []
+        },
+        {
+            "name": "OAuth",
+            "item": [
+                {
+                    "name": "1. Authorize (Open in Browser)",
+                    "event": [
+                        {
+                            "listen": "prerequest",
+                            "script": {
+                                "exec": [
+                                    "// This endpoint redirects to Intuit OAuth page",
+                                    "// Open this URL in your browser to complete OAuth flow",
+                                    "// After authorization, you'll be redirected to callback URL",
+                                    "// Copy the 'realmId' parameter from the callback URL",
+                                    "// Set it as the 'companyId' variable in your environment"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}/auth/authorize",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "auth",
+                                "authorize"
+                            ]
+                        },
+                        "description": "**IMPORTANT:** Open this URL in your browser (not in Postman) to start the OAuth flow.\n\nAfter completing authorization:\n1. You'll be redirected to a callback URL like: `http://localhost:5000/auth/callback?code=...&realmId=9341455793300229`\n2. Copy the `realmId` value from the URL\n3. Set it as the `companyId` variable in your Postman environment\n4. The callback page will also display your realmId and ready-to-use curl commands"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "2. Refresh Token",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"RefreshToken\": \"{{refreshToken}}\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/auth/refresh",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "auth",
+                                "refresh"
+                            ]
+                        },
+                        "description": "Refresh the access token using a refresh token. This is typically handled automatically, but can be called manually if needed."
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Invoices",
+            "item": [
+                {
+                    "name": "Create Invoice - Simple",
+                    "event": [
+                        {
+                            "listen": "prerequest",
+                            "script": {
+                                "exec": [
+                                    "// Set dynamic dates",
+                                    "const today = new Date();",
+                                    "const dueDate = new Date(today);",
+                                    "dueDate.setDate(dueDate.getDate() + 30);",
+                                    "",
+                                    "pm.environment.set(\"today\", today.toISOString().split('T')[0]);",
+                                    "pm.environment.set(\"dueDate\", dueDate.toISOString().split('T')[0]);"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        },
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test(\"Status code is 201\", function () {",
+                                    "    pm.response.to.have.status(201);",
+                                    "});",
+                                    "",
+                                    "pm.test(\"Response has invoice data\", function () {",
+                                    "    var jsonData = pm.response.json();",
+                                    "    pm.expect(jsonData.success).to.be.true;",
+                                    "    pm.expect(jsonData.data).to.have.property('Id');",
+                                    "    ",
+                                    "    // Save invoice ID for later use",
+                                    "    if (jsonData.data && jsonData.data.Id) {",
+                                    "        pm.environment.set(\"invoiceId\", jsonData.data.Id);",
+                                    "        console.log(\"Invoice ID saved: \" + jsonData.data.Id);",
+                                    "    }",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"CustomerRef\": {\n    \"value\": \"1\"\n  },\n  \"Line\": [\n    {\n      \"DetailType\": \"SalesItemLineDetail\",\n      \"Amount\": 100.00,\n      \"Description\": \"Service fee\",\n      \"SalesItemLineDetail\": {\n        \"ItemRef\": {\n          \"value\": \"2\"\n        },\n        \"Qty\": 1,\n        \"UnitPrice\": 100.00\n      }\n    }\n  ],\n  \"TxnDate\": \"{{today}}\",\n  \"DueDate\": \"{{dueDate}}\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/api/invoices?companyId={{companyId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "invoices"
+                            ],
+                            "query": [
+                                {
+                                    "key": "companyId",
+                                    "value": "{{companyId}}",
+                                    "description": "The realmId from OAuth callback"
+                                }
+                            ]
+                        },
+                        "description": "Create a simple invoice with a single line item.\n\n**Required Fields:**\n- `CustomerRef.value`: Customer ID in QuickBooks\n- `Line[].DetailType`: Must be \"SalesItemLineDetail\"\n- `Line[].SalesItemLineDetail.ItemRef.value`: Item ID in QuickBooks\n- `Line[].SalesItemLineDetail.Qty`: Quantity\n- `Line[].SalesItemLineDetail.UnitPrice`: Unit price\n\n**Optional Fields:**\n- `TxnDate`: Transaction date (YYYY-MM-DD), defaults to today\n- `DueDate`: Due date (YYYY-MM-DD), defaults to 30 days from today\n- `DocNumber`: Custom document number\n- `Description`: Line item description\n\n**Note:** Dates are automatically set to today and 30 days from today via pre-request script."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Create Invoice - Multiple Line Items",
+                    "event": [
+                        {
+                            "listen": "prerequest",
+                            "script": {
+                                "exec": [
+                                    "// Set dynamic dates",
+                                    "const today = new Date();",
+                                    "const dueDate = new Date(today);",
+                                    "dueDate.setDate(dueDate.getDate() + 30);",
+                                    "",
+                                    "pm.environment.set(\"today\", today.toISOString().split('T')[0]);",
+                                    "pm.environment.set(\"dueDate\", dueDate.toISOString().split('T')[0]);"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        },
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test(\"Status code is 201\", function () {",
+                                    "    pm.response.to.have.status(201);",
+                                    "});",
+                                    "",
+                                    "pm.test(\"Response has invoice data\", function () {",
+                                    "    var jsonData = pm.response.json();",
+                                    "    pm.expect(jsonData.success).to.be.true;",
+                                    "    pm.expect(jsonData.data).to.have.property('Id');",
+                                    "    ",
+                                    "    if (jsonData.data && jsonData.data.Id) {",
+                                    "        pm.environment.set(\"invoiceId\", jsonData.data.Id);",
+                                    "    }",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"CustomerRef\": {\n    \"value\": \"1\"\n  },\n  \"Line\": [\n    {\n      \"DetailType\": \"SalesItemLineDetail\",\n      \"Amount\": 150.00,\n      \"Description\": \"Consulting Services\",\n      \"SalesItemLineDetail\": {\n        \"ItemRef\": {\n          \"value\": \"2\"\n        },\n        \"Qty\": 3,\n        \"UnitPrice\": 50.00\n      }\n    },\n    {\n      \"DetailType\": \"SalesItemLineDetail\",\n      \"Amount\": 75.50,\n      \"Description\": \"Support Fee\",\n      \"SalesItemLineDetail\": {\n        \"ItemRef\": {\n          \"value\": \"3\"\n        },\n        \"Qty\": 1,\n        \"UnitPrice\": 75.50\n      }\n    },\n    {\n      \"DetailType\": \"SalesItemLineDetail\",\n      \"Amount\": 25.00,\n      \"Description\": \"Setup Fee\",\n      \"SalesItemLineDetail\": {\n        \"ItemRef\": {\n          \"value\": \"4\"\n        },\n        \"Qty\": 1,\n        \"UnitPrice\": 25.00\n      }\n    }\n  ],\n  \"TxnDate\": \"{{today}}\",\n  \"DueDate\": \"{{dueDate}}\",\n  \"DocNumber\": \"INV-{{$randomInt}}\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/api/invoices?companyId={{companyId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "invoices"
+                            ],
+                            "query": [
+                                {
+                                    "key": "companyId",
+                                    "value": "{{companyId}}"
+                                }
+                            ]
+                        },
+                        "description": "Create an invoice with multiple line items. This example includes:\n- 3 different line items\n- Custom document number (DocNumber)\n- Multiple quantities and prices\n\n**Total Amount:** 250.50 (150.00 + 75.50 + 25.00)"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Create Invoice - With Custom DocNumber",
+                    "event": [
+                        {
+                            "listen": "prerequest",
+                            "script": {
+                                "exec": [
+                                    "// Set dynamic dates",
+                                    "const today = new Date();",
+                                    "const dueDate = new Date(today);",
+                                    "dueDate.setDate(dueDate.getDate() + 30);",
+                                    "",
+                                    "pm.environment.set(\"today\", today.toISOString().split('T')[0]);",
+                                    "pm.environment.set(\"dueDate\", dueDate.toISOString().split('T')[0]);"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        },
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test(\"Status code is 201\", function () {",
+                                    "    pm.response.to.have.status(201);",
+                                    "});",
+                                    "",
+                                    "pm.test(\"Response has invoice data\", function () {",
+                                    "    var jsonData = pm.response.json();",
+                                    "    pm.expect(jsonData.success).to.be.true;",
+                                    "    pm.expect(jsonData.data).to.have.property('Id');",
+                                    "    ",
+                                    "    if (jsonData.data && jsonData.data.Id) {",
+                                    "        pm.environment.set(\"invoiceId\", jsonData.data.Id);",
+                                    "    }",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"CustomerRef\": {\n    \"value\": \"1\"\n  },\n  \"Line\": [\n    {\n      \"DetailType\": \"SalesItemLineDetail\",\n      \"Amount\": 500.00,\n      \"Description\": \"Monthly Subscription\",\n      \"SalesItemLineDetail\": {\n        \"ItemRef\": {\n          \"value\": \"2\"\n        },\n        \"Qty\": 1,\n        \"UnitPrice\": 500.00\n      }\n    }\n  ],\n  \"TxnDate\": \"{{today}}\",\n  \"DueDate\": \"{{dueDate}}\",\n  \"DocNumber\": \"INV-2025-001\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/api/invoices?companyId={{companyId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "invoices"
+                            ],
+                            "query": [
+                                {
+                                    "key": "companyId",
+                                    "value": "{{companyId}}"
+                                }
+                            ]
+                        },
+                        "description": "Create an invoice with a custom document number. The `DocNumber` field allows you to specify your own invoice numbering system."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Invoice",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test(\"Status code is 200\", function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});",
+                                    "",
+                                    "pm.test(\"Response has invoice data\", function () {",
+                                    "    var jsonData = pm.response.json();",
+                                    "    pm.expect(jsonData.success).to.be.true;",
+                                    "    pm.expect(jsonData.data).to.have.property('Id');",
+                                    "    pm.expect(jsonData.data).to.have.property('TotalAmt');",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}/api/invoices/{{invoiceId}}?companyId={{companyId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "invoices",
+                                "{{invoiceId}}"
+                            ],
+                            "query": [
+                                {
+                                    "key": "companyId",
+                                    "value": "{{companyId}}",
+                                    "description": "The realmId from OAuth callback"
+                                }
+                            ]
+                        },
+                        "description": "Retrieve an invoice by its ID.\n\n**Parameters:**\n- `invoiceId`: The invoice ID (path parameter) - use the `{{invoiceId}}` variable which is automatically set after creating an invoice\n- `companyId`: The realmId from OAuth callback (query parameter)\n\n**Response includes:**\n- Invoice ID, SyncToken, CustomerRef\n- Line items with amounts\n- TotalAmt, Balance\n- DocNumber, TxnDate, DueDate"
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Credit Notes",
+            "item": [
+                {
+                    "name": "Create Credit Note (Cancel Invoice)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test(\"Status code is 201\", function () {",
+                                    "    pm.response.to.have.status(201);",
+                                    "});",
+                                    "",
+                                    "pm.test(\"Response has credit memo data\", function () {",
+                                    "    var jsonData = pm.response.json();",
+                                    "    pm.expect(jsonData.success).to.be.true;",
+                                    "    pm.expect(jsonData.data).to.have.property('Id');",
+                                    "    ",
+                                    "    // Save credit note ID for later use",
+                                    "    if (jsonData.data && jsonData.data.Id) {",
+                                    "        pm.environment.set(\"creditNoteId\", jsonData.data.Id);",
+                                    "        console.log(\"Credit Note ID saved: \" + jsonData.data.Id);",
+                                    "    }",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}/api/invoices/{{invoiceId}}/credit-note?companyId={{companyId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "invoices",
+                                "{{invoiceId}}",
+                                "credit-note"
+                            ],
+                            "query": [
+                                {
+                                    "key": "companyId",
+                                    "value": "{{companyId}}",
+                                    "description": "The realmId from OAuth callback"
+                                }
+                            ]
+                        },
+                        "description": "Create a credit note (credit memo) to cancel an invoice.\n\n**How it works:**\n1. Fetches the original invoice by ID\n2. Creates a credit memo with matching line items but negative amounts\n3. Effectively cancels the invoice\n\n**Parameters:**\n- `invoiceId`: The invoice ID to cancel (path parameter) - use the `{{invoiceId}}` variable\n- `companyId`: The realmId from OAuth callback (query parameter)\n\n**Note:** The credit memo will have the same line items as the original invoice, but with negative amounts to offset the invoice."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Credit Note",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test(\"Status code is 200\", function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});",
+                                    "",
+                                    "pm.test(\"Response has credit memo data\", function () {",
+                                    "    var jsonData = pm.response.json();",
+                                    "    pm.expect(jsonData.success).to.be.true;",
+                                    "    pm.expect(jsonData.data).to.have.property('Id');",
+                                    "    pm.expect(jsonData.data).to.have.property('TotalAmt');",
+                                    "});"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}/api/credit-notes/{{creditNoteId}}?companyId={{companyId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "credit-notes",
+                                "{{creditNoteId}}"
+                            ],
+                            "query": [
+                                {
+                                    "key": "companyId",
+                                    "value": "{{companyId}}",
+                                    "description": "The realmId from OAuth callback"
+                                }
+                            ]
+                        },
+                        "description": "Retrieve a credit note (credit memo) by its ID.\n\n**Parameters:**\n- `creditNoteId`: The credit note ID (path parameter) - use the `{{creditNoteId}}` variable which is automatically set after creating a credit note\n- `companyId`: The realmId from OAuth callback (query parameter)\n\n**Response includes:**\n- Credit Memo ID, SyncToken, CustomerRef\n- Line items with amounts (negative values)\n- TotalAmt, Balance\n- DocNumber, TxnDate"
+                    },
+                    "response": []
+                }
+            ]
+        }
+    ],
+    "variable": [
+        {
+            "key": "baseUrl",
+            "value": "http://localhost:5000",
+            "type": "string"
+        },
+        {
+            "key": "companyId",
+            "value": "",
+            "type": "string",
+            "description": "Set this to your realmId from OAuth callback"
+        },
+        {
+            "key": "invoiceId",
+            "value": "",
+            "type": "string",
+            "description": "Automatically set after creating an invoice"
+        },
+        {
+            "key": "creditNoteId",
+            "value": "",
+            "type": "string",
+            "description": "Automatically set after creating a credit note"
+        },
+        {
+            "key": "today",
+            "value": "",
+            "type": "string",
+            "description": "Automatically set to today's date (YYYY-MM-DD)"
+        },
+        {
+            "key": "dueDate",
+            "value": "",
+            "type": "string",
+            "description": "Automatically set to 30 days from today (YYYY-MM-DD)"
+        },
+        {
+            "key": "refreshToken",
+            "value": "",
+            "type": "string",
+            "description": "Refresh token for token refresh endpoint (optional)"
+        }
+    ]
+}
