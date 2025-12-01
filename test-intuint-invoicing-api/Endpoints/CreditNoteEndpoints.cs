@@ -14,6 +14,12 @@ public static class CreditNoteEndpoints
             .Produces<ApiResponse<CreditMemoEntity>>(201)
             .Produces<ApiResponse<object>>(400);
 
+        app.MapGet("/api/credit-notes", GetAllCreditNotes)
+            .WithName("GetAllCreditNotes")
+            .WithTags("CreditNotes")
+            .Produces<ApiResponse<List<CreditMemoEntity>>>(200)
+            .Produces<ApiResponse<object>>(401);
+
         app.MapGet("/api/credit-notes/{creditNoteId}", GetCreditNote)
             .WithName("GetCreditNote")
             .WithTags("CreditNotes")
@@ -142,6 +148,46 @@ public static class CreditNoteEndpoints
 
         logger.LogInformation("Credit note retrieved successfully: {CreditNoteId}", creditNoteId);
         return Results.Ok(ApiResponse<CreditMemoEntity>.Ok(creditMemo));
+    }
+
+    private static async Task<IResult> GetAllCreditNotes(
+        IQuickBooksApiClient qbClient,
+        IIntuitOAuthService oauthService,
+        ILogger<Program> logger,
+        [FromQuery] string companyId,
+        [FromQuery] int? maxResults = null)
+    {
+        logger.LogInformation("GetAllCreditNotes called for companyId: {CompanyId}, maxResults: {MaxResults}", companyId, maxResults);
+        
+        // Validate company ID is provided
+        if (string.IsNullOrEmpty(companyId))
+            return Results.BadRequest(ApiResponse<object>.Fail("companyId is required"));
+
+        // Retrieve stored OAuth tokens for this company, auto-refresh if expired
+        var tokens = await oauthService.GetOrRefreshTokensAsync(companyId);
+        if (tokens == null || string.IsNullOrEmpty(tokens.AccessToken))
+        {
+            logger.LogWarning("GetAllCreditNotes failed: No OAuth tokens found for companyId: {CompanyId}", companyId);
+            return Results.Json(
+                ApiResponse<object>.Fail($"No OAuth tokens found for companyId: {companyId}. Please complete OAuth authorization first by visiting: /auth/authorize"),
+                statusCode: 401);
+        }
+
+        try
+        {
+            // Fetch all credit memos from QuickBooks using Query API
+            logger.LogInformation("Calling QuickBooks API to get all credit memos for companyId: {CompanyId}", companyId);
+            var creditMemos = await qbClient.GetAllCreditMemosAsync(companyId, tokens.AccessToken, maxResults);
+            
+            logger.LogInformation("Retrieved {Count} credit memos for companyId: {CompanyId}", creditMemos.Count, companyId);
+            return Results.Ok(ApiResponse<List<CreditMemoEntity>>.Ok(creditMemos));
+        }
+        catch (Exception ex)
+        {
+            // Return error if QuickBooks API call fails
+            logger.LogError(ex, "GetAllCreditNotes failed with exception for companyId: {CompanyId}", companyId);
+            return Results.BadRequest(ApiResponse<object>.Fail(ex.Message));
+        }
     }
 }
 

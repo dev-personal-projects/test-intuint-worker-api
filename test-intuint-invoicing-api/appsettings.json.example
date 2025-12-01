@@ -1,0 +1,19 @@
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "AllowedHosts": "*",
+  "Intuit": {
+    "ClientId": "YOUR_CLIENT_ID_HERE",
+    "ClientSecret": "YOUR_CLIENT_SECRET_HERE",
+    "RedirectUri": "http://localhost:5000/auth/callback",
+    "Environment": "sandbox",
+    "BaseUrl": "https://sandbox-quickbooks.api.intuit.com",
+    "AuthorizationUrl": "https://appcenter.intuit.com/connect/oauth2",
+    "TokenUrl": "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
+  }
+}
+

@@ -15,6 +15,7 @@ public interface IQuickBooksApiClient
     Task<List<InvoiceEntity>> GetAllInvoicesAsync(string companyId, string accessToken, int? maxResults = null);
     Task<CreditMemoEntity?> CreateCreditMemoAsync(string companyId, string accessToken, CreditMemoRequest request);
     Task<CreditMemoEntity?> GetCreditMemoAsync(string companyId, string accessToken, string creditMemoId);
+    Task<List<CreditMemoEntity>> GetAllCreditMemosAsync(string companyId, string accessToken, int? maxResults = null);
     Task<PaymentEntity?> CreatePaymentAsync(string companyId, string accessToken, PaymentRequest request);
     Task<CustomerEntity?> FindCustomerByNameAsync(string companyId, string accessToken, string customerName);
     Task<CustomerEntity?> CreateCustomerAsync(string companyId, string accessToken, CustomerRequest request);
@@ -172,6 +173,33 @@ public class QuickBooksApiClient : IQuickBooksApiClient
 
         var result = JsonSerializer.Deserialize<QuickBooksResponse<CreditMemoEntity>>(content);
         return result?.CreditMemo;
+    }
+
+    public async Task<List<CreditMemoEntity>> GetAllCreditMemosAsync(string companyId, string accessToken, int? maxResults = null)
+    {
+        // Retrieve all credit memos from QuickBooks using Query API
+        // Uses SQL-like query syntax to fetch all credit memos, optionally limited by maxResults
+        var query = "SELECT * FROM CreditMemo";
+        if (maxResults.HasValue && maxResults.Value > 0)
+        {
+            query += $" MAXRESULTS {maxResults.Value}";
+        }
+        
+        var encodedQuery = Uri.EscapeDataString(query);
+        var url = $"{_settings.BaseUrl}/v3/company/{companyId}/query?query={encodedQuery}";
+        var httpRequest = new HttpRequestMessage(HttpMethod.Get, url);
+        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        var response = await _httpClient.SendAsync(httpRequest);
+        var content = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+            throw new HttpRequestException($"QuickBooks API error: {response.StatusCode} - {content}");
+
+        // Deserialize query response and return list of credit memos
+        var result = JsonSerializer.Deserialize<QuickBooksResponse<CreditMemoEntity>>(content);
+        return result?.QueryResponse?.CreditMemo ?? new List<CreditMemoEntity>();
     }
 
     public async Task<PaymentEntity?> CreatePaymentAsync(string companyId, string accessToken, PaymentRequest request)

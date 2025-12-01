@@ -2,20 +2,73 @@
 
 ASP.NET Core Minimal API for creating invoices and credit notes through QuickBooks Online API. This project provides a clean, organized REST API for integrating with Intuit's QuickBooks Online platform.
 
+## 🚀 Quick Start for New Developers
+
+1. **Clone and navigate:**
+   ```bash
+   git clone <repository-url>
+   cd test-intuint-invoicing-api/test-intuint-invoicing-api
+   ```
+
+2. **Set up configuration:**
+   ```bash
+   cp appsettings.json.example appsettings.json
+   # Edit appsettings.json with your Intuit credentials (see below)
+   ```
+
+3. **Install and run:**
+   ```bash
+   dotnet restore
+   dotnet run
+   ```
+
+4. **Get your Intuit credentials:**
+   - Register at [Intuit Developer Portal](https://developer.intuit.com)
+   - Create an app and get **Client ID** & **Client Secret**
+   - Add redirect URI: `http://localhost:5000/auth/callback` in Developer Portal
+
+5. **Authorize and get Company ID:**
+   - Visit: `http://localhost:5000/auth/authorize` in your browser
+   - Complete OAuth flow
+   - Copy the `realmId` (Company ID) from the callback page
+
+6. **Start testing:**
+   ```bash
+   # List all invoices
+   ./scripts/list-invoices.sh YOUR_REALM_ID
+   
+   # Create an invoice
+   ./scripts/create-invoice.sh "Customer Name" YOUR_REALM_ID
+   ```
+
+📖 **For detailed setup instructions, see [Getting Started](#getting-started) section below.**
+
 ## Features
 
 - OAuth 2.0 authentication with Intuit
-- Create invoices programmatically
+- Create invoices programmatically with automatic customer creation
 - Create credit notes to cancel/adjust invoices
-- Retrieve invoice and credit note details
-- Token refresh mechanism
+- List all invoices and credit notes with summary statistics
+- Retrieve invoice and credit note details by ID
+- Apply payments to invoices and automatically create credit notes
+- Token refresh mechanism with persistent storage
+- Idempotency checks to prevent duplicate invoices
 - Swagger UI documentation
+- Comprehensive shell scripts for easy testing
 
 ## Prerequisites
 
 - .NET 9.0 SDK or later
 - Intuit Developer account
 - QuickBooks Online sandbox company (for testing)
+- `jq` (optional but recommended) - For better JSON formatting in shell scripts
+  - Install on Linux: `apt-get update && apt-get install -y jq`
+  - Install on macOS: `brew install jq`
+  - Install on Windows: Download from [jq official site](https://stedolan.github.io/jq/download/)
+- `jq` (optional but recommended) - For better JSON formatting in shell scripts
+  - Install on Linux: `apt-get update && apt-get install -y jq`
+  - Install on macOS: `brew install jq`
+  - Install on Windows: Download from [jq official site](https://stedolan.github.io/jq/download/)
 
 ## Project Structure
 
@@ -34,8 +87,16 @@ test-intuint-invoicing-api/
 │   ├── IntuitOAuthService.cs    # OAuth 2.0 flow handling
 │   └── QuickBooksApiClient.cs   # QuickBooks API client
 ├── Program.cs              # Application entry point
-├── appsettings.json        # Configuration
-└── Intuit-Invoicing-API.postman_collection.json  # Postman collection for testing
+├── appsettings.json        # Configuration (create from appsettings.json.example)
+├── appsettings.json.example # Configuration template (copy to appsettings.json)
+└── scripts/                # Shell scripts for testing
+    ├── create-invoice.sh
+    ├── list-invoices.sh
+    ├── get-invoice.sh
+    ├── settle-invoice.sh
+    ├── create-credit-note.sh
+    ├── list-credit-notes.sh
+    └── get-credit-note.sh
 ```
 
 ## Getting Started
@@ -55,6 +116,8 @@ dotnet restore
 
 ### 3. Configure Intuit Credentials
 
+#### Step 1: Get Intuit Developer Credentials
+
 1. Register your app at [Intuit Developer Portal](https://developer.intuit.com)
 2. Create a new app and note your **Client ID** and **Client Secret**
 3. **Add Redirect URI in Developer Portal:**
@@ -71,21 +134,39 @@ dotnet restore
      - ❌ `https://localhost:5001/auth/callback` (wrong protocol AND port)
    - Click **Save**
    - Wait 2-3 minutes for changes to propagate
-4. Verify `appsettings.json` has the same redirect URI (should be HTTP):
 
-```json
-{
-  "Intuit": {
-    "ClientId": "your-client-id-here",
-    "ClientSecret": "your-client-secret-here",
-    "RedirectUri": "https://localhost:5001/auth/callback",
-    "Environment": "sandbox",
-    "BaseUrl": "https://sandbox-quickbooks.api.intuit.com"
-  }
-}
-```
+#### Step 2: Create Configuration File
 
-**Note:** The `appsettings.json` file already contains configured credentials. Verify they match your Intuit Developer Portal settings.
+1. **Copy the example configuration file:**
+   ```bash
+   cd test-intuint-invoicing-api
+   cp appsettings.json.example appsettings.json
+   ```
+
+2. **Edit `appsettings.json` and add your credentials:**
+   ```json
+   {
+     "Intuit": {
+       "ClientId": "YOUR_CLIENT_ID_HERE",
+       "ClientSecret": "YOUR_CLIENT_SECRET_HERE",
+       "RedirectUri": "http://localhost:5000/auth/callback",
+       "Environment": "sandbox",
+       "BaseUrl": "https://sandbox-quickbooks.api.intuit.com",
+       "AuthorizationUrl": "https://appcenter.intuit.com/connect/oauth2",
+       "TokenUrl": "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
+     }
+   }
+   ```
+
+3. **Replace the placeholders:**
+   - Replace `YOUR_CLIENT_ID_HERE` with your actual Client ID from Intuit Developer Portal
+   - Replace `YOUR_CLIENT_SECRET_HERE` with your actual Client Secret
+   - Verify `RedirectUri` matches exactly what you added in the Developer Portal
+
+**Important Security Note:**
+- ⚠️ **Never commit `appsettings.json`** to version control (it's already in `.gitignore`)
+- ✅ The `appsettings.json.example` file is safe to commit (contains no secrets)
+- ✅ Each developer should create their own `appsettings.json` from the example
 
 ### 4. Run the Application
 
@@ -271,7 +352,24 @@ curl -X GET "http://localhost:5000/api/invoices/INVOICE_ID?companyId=YOUR_REALM_
 
 ### Credit Notes
 
+#### Get All Credit Notes
+
+**Endpoint:** `GET /api/credit-notes`
+
+```bash
+curl -X GET "http://localhost:5000/api/credit-notes?companyId=YOUR_REALM_ID"
+```
+
+**Optional Parameters:**
+- `maxResults` - Limit the number of results (e.g., `?companyId=YOUR_REALM_ID&maxResults=50`)
+
+**Response:** `200 OK` with a list of all credit memos
+
+**Note:** This endpoint retrieves all credit notes (credit memos) created in QuickBooks for the specified company.
+
 #### Create Credit Note (Cancel Invoice)
+
+**Endpoint:** `POST /api/invoices/{invoiceId}/credit-note`
 
 ```bash
 curl -X POST "http://localhost:5000/api/invoices/INVOICE_ID/credit-note?companyId=YOUR_REALM_ID"
@@ -283,10 +381,13 @@ curl -X POST "http://localhost:5000/api/invoices/INVOICE_ID/credit-note?companyI
 - Replace `INVOICE_ID` with the invoice ID you want to cancel
 - Replace `YOUR_REALM_ID` with your company ID
 - This creates a credit memo matching the invoice amount, effectively canceling it
+- Can be created after invoice settlement (regardless of payment amount)
 
 **Response:** `201 Created` with credit memo details including the credit note ID
 
 #### Get Credit Note
+
+**Endpoint:** `GET /api/credit-notes/{creditNoteId}`
 
 ```bash
 curl -X GET "http://localhost:5000/api/credit-notes/CREDIT_NOTE_ID?companyId=YOUR_REALM_ID"
@@ -297,6 +398,21 @@ curl -X GET "http://localhost:5000/api/credit-notes/CREDIT_NOTE_ID?companyId=YOU
 **Note:** Replace `CREDIT_NOTE_ID` with the actual credit note ID and `YOUR_REALM_ID` with your company ID.
 
 **Response:** `200 OK` with credit memo details
+
+#### Viewing Credit Notes in QuickBooks Portal
+
+Credit notes (credit memos) can be viewed in QuickBooks Online through:
+
+1. **Sales Menu → Products and Services**
+   - Click on the "Credit Memos" tab to see all credit memos
+
+2. **Sales → All Sales**
+   - Filter by "Credit Memos" to view credit notes
+
+3. **Reports → Sales**
+   - Various sales reports include credit memo information
+
+**Note:** Credit memos appear with negative amounts in QuickBooks, but when creating them via the API, you provide positive amounts (QuickBooks automatically treats them as credits).
 
 ## Testing
 
@@ -388,10 +504,163 @@ Postman is easier for testing complex JSON requests. A comprehensive Postman col
    curl -X POST "http://localhost:5000/api/invoices/INVOICE_ID/credit-note?companyId=YOUR_REALM_ID" | jq
    ```
 
+### Option 3: Using Shell Scripts
+
+The project includes convenient shell scripts in the `scripts/` folder for common operations. All scripts support optional `jq` for enhanced JSON formatting.
+
+**Note:** Scripts work without `jq`, but installing it provides better formatted output. See [Prerequisites](#prerequisites) for installation instructions.
+
+#### List All Invoices
+
+```bash
+./scripts/list-invoices.sh [companyId] [maxResults]
+```
+
+**Examples:**
+```bash
+# List all invoices (uses default company ID)
+./scripts/list-invoices.sh
+
+# List invoices for specific company
+./scripts/list-invoices.sh 9341455793300229
+
+# List invoices with max results limit
+./scripts/list-invoices.sh 9341455793300229 50
+```
+
+**Features:**
+- Displays summary with total invoice count
+- Pretty-prints JSON response (if `jq` is installed)
+- Shows invoice IDs, DocNumbers, totals, and balances
+- Provides quick action commands
+
+#### List All Credit Notes
+
+```bash
+./scripts/list-credit-notes.sh [companyId] [maxResults]
+```
+
+**Examples:**
+```bash
+# List all credit notes (uses default company ID)
+./scripts/list-credit-notes.sh
+
+# List credit notes for specific company
+./scripts/list-credit-notes.sh 9341455793300229
+
+# List credit notes with max results limit
+./scripts/list-credit-notes.sh 9341455793300229 50
+```
+
+**Features:**
+- Displays summary with total credit note count
+- Pretty-prints JSON response (if `jq` is installed)
+- Shows credit note IDs, DocNumbers, totals, and customer info
+- Provides quick action commands and portal location info
+
+#### Get Invoice by ID
+
+```bash
+./scripts/get-invoice.sh <invoiceId> [companyId]
+```
+
+**Examples:**
+```bash
+# Get invoice by ID (uses default company ID)
+./scripts/get-invoice.sh 147
+
+# Get invoice for specific company
+./scripts/get-invoice.sh 147 9341455793300229
+```
+
+**Features:**
+- Displays detailed invoice summary (ID, DocNumber, Customer, Dates, Amounts, Status)
+- Shows all line items with quantities and prices
+- Pretty-prints full JSON response (if `jq` is installed)
+- Provides quick action commands (list, settle, create credit note)
+- Shows invoice status (PAID/UNPAID)
+
+#### Get Credit Note by ID
+
+```bash
+./scripts/get-credit-note.sh <creditNoteId> [companyId]
+```
+
+**Examples:**
+```bash
+# Get credit note by ID (uses default company ID)
+./scripts/get-credit-note.sh 148
+
+# Get credit note for specific company
+./scripts/get-credit-note.sh 148 9341455793300229
+```
+
+**Features:**
+- Displays detailed credit note summary (ID, DocNumber, Customer, Date, Amount)
+- Shows all line items with quantities and prices
+- Pretty-prints full JSON response (if `jq` is installed)
+- Provides quick action commands and portal location info
+- Handles negative amounts correctly (displays as positive credit)
+
+#### Create Invoice
+
+```bash
+./scripts/create-invoice.sh [customerName] [companyId]
+```
+
+**Example:**
+```bash
+./scripts/create-invoice.sh "Shipht It Company" 9341455793300229
+```
+
+**Features:**
+- Automatically creates customer if it doesn't exist
+- Uses today's date and calculates due date (30 days)
+- Comprehensive invoice with multiple line items
+- Idempotency check to prevent duplicates
+
+#### Settle Invoice
+
+```bash
+./scripts/settle-invoice.sh <invoiceId> <paymentAmount> [companyId]
+```
+
+**Example:**
+```bash
+./scripts/settle-invoice.sh 147 16567.00 9341455793300229
+```
+
+**Features:**
+- Applies payment to invoice
+- Verifies updated balance
+- Automatically creates credit note after settlement
+- Shows settlement status (fully paid or partially paid)
+
+#### Create Credit Note
+
+```bash
+./scripts/create-credit-note.sh <invoiceId> [companyId]
+```
+
+**Example:**
+```bash
+./scripts/create-credit-note.sh 147 9341455793300229
+```
+
+**Features:**
+- Creates credit memo matching invoice
+- Verifies invoice settlement status
+- Shows updated invoice balance
+
 ### Tips for Testing
 
 - Use `http://localhost:5000` (HTTP), not `https://` (HTTPS) - the app runs on HTTP port 5000
 - Pipe to `jq` for formatted JSON output: `curl ... | jq`
+- Install `jq` for better script output:
+  - **Linux**: `apt-get update && apt-get install -y jq` (or `sudo apt-get install jq` if not root)
+  - **macOS**: `brew install jq`
+  - **Windows**: Download from [jq official site](https://stedolan.github.io/jq/download/)
+- All shell scripts automatically detect and use `jq` if installed for enhanced formatting
 - Save responses to variables in bash:
   ```bash
   INVOICE_RESPONSE=$(curl -X POST "https://localhost:5001/api/invoices?companyId=YOUR_REALM_ID" \
@@ -474,8 +743,11 @@ app.MapMyEndpoints();
 
 When creating a credit note:
 1. Original invoice is fetched from QuickBooks
-2. Credit memo is created with matching line items (negative amounts)
+2. Credit memo is created with matching line items (positive amounts - QuickBooks treats them as credits automatically)
 3. Credit memo effectively cancels the invoice
+4. Credit notes can be created after invoice settlement (regardless of payment amount)
+
+**Note:** The `settle-invoice.sh` script automatically creates a credit note after applying a payment to an invoice, regardless of whether the invoice is fully or partially paid.
 
 ## Troubleshooting
 
@@ -559,18 +831,123 @@ For production:
 
 ## Contributing
 
-1. Create a feature branch
-2. Make your changes with clear comments
-3. Ensure code builds without errors
-4. Test your changes
-5. Submit a pull request
+We welcome contributions! Here's how to get started:
 
-### Code Style
+### Setting Up for Development
 
-- Keep functions focused and single-purpose
-- Add comments explaining what functions do
-- Use meaningful variable names
-- Follow existing code structure
+1. **Fork and clone the repository:**
+   ```bash
+   git clone <your-fork-url>
+   cd test-intuint-invoicing-api/test-intuint-invoicing-api
+   ```
+
+2. **Set up your development environment:**
+   ```bash
+   # Install dependencies
+   dotnet restore
+   
+   # Create your configuration file from the example
+   cp appsettings.json.example appsettings.json
+   
+   # Edit appsettings.json with your Intuit credentials
+   # Replace YOUR_CLIENT_ID_HERE and YOUR_CLIENT_SECRET_HERE
+   # (See "Configure Intuit Credentials" section above for detailed steps)
+   ```
+
+3. **Get your Intuit Developer credentials:**
+   - If you don't have an Intuit Developer account, create one at [Intuit Developer Portal](https://developer.intuit.com)
+   - Create a new app in the Developer Portal
+   - Copy your **Client ID** and **Client Secret**
+   - Add the redirect URI: `http://localhost:5000/auth/callback` in your app settings
+
+4. **Verify everything works:**
+   ```bash
+   # Build the project
+   dotnet build
+   
+   # Run the application
+   dotnet run
+   
+   # Test the health endpoint
+   curl http://localhost:5000/health
+   ```
+
+### Development Workflow
+
+1. **Create a feature branch:**
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+
+2. **Make your changes:**
+   - Follow the existing code structure
+   - Add comments explaining what functions do
+   - Keep functions focused and single-purpose
+   - Use meaningful variable names
+
+3. **Test your changes:**
+   ```bash
+   # Build to check for errors
+   dotnet build
+   
+   # Run the application and test endpoints
+   dotnet run
+   
+   # Use the provided shell scripts to test functionality
+   ./scripts/list-invoices.sh
+   ```
+
+4. **Commit your changes:**
+   ```bash
+   git add .
+   git commit -m "Description of your changes"
+   ```
+
+5. **Push and create a pull request:**
+   ```bash
+   git push origin feature/your-feature-name
+   ```
+   Then create a pull request on GitHub.
+
+### Code Style Guidelines
+
+- **Keep functions focused and single-purpose** - Each function should do one thing well
+- **Add comments explaining what functions do** - Help other developers understand your code
+- **Use meaningful variable names** - Make code self-documenting
+- **Follow existing code structure** - Maintain consistency with the project
+- **Handle errors gracefully** - Provide clear error messages
+- **Test your changes** - Use the provided scripts or Swagger UI
+
+### Project Structure Guidelines
+
+- **Endpoints** go in `Endpoints/` folder - One file per endpoint group
+- **Services** go in `Services/` folder - Business logic and external API clients
+- **Models** go in `Models/` folder - DTOs and data models
+- **Scripts** go in `scripts/` folder - Shell scripts for testing and automation
+
+### Before Submitting
+
+- ✅ Code builds without errors (`dotnet build`)
+- ✅ All endpoints tested and working
+- ✅ Comments added for new functions
+- ✅ No hardcoded credentials or secrets
+- ✅ Follows existing code patterns
+- ✅ README updated if adding new features
+- ✅ `appsettings.json` is NOT committed (only `appsettings.json.example`)
+
+### Common Issues for Contributors
+
+**Issue: "No OAuth tokens found"**
+- Solution: Complete the OAuth flow first by visiting `http://localhost:5000/auth/authorize`
+
+**Issue: "Invalid redirect_uri"**
+- Solution: Make sure you added `http://localhost:5000/auth/callback` in Intuit Developer Portal
+
+**Issue: Build errors**
+- Solution: Run `dotnet restore` to ensure all packages are installed
+
+**Issue: Port already in use**
+- Solution: Stop other instances or change the port in `Properties/launchSettings.json`
 
 ## Resources
 

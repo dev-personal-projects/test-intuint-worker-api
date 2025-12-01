@@ -145,6 +145,30 @@ if echo "$UPDATED_INVOICE_RESPONSE" | grep -q '"success" *: *true'; then
         echo "  Amount Paid: \$${AMOUNT_PAID}"
     fi
     
+    # Step 4: Create credit note after settlement (regardless of amount settled)
+    echo ""
+    echo "Step 4: Creating credit note for settled invoice..."
+    CREDIT_NOTE_RESPONSE=$(curl -s -X POST "${BASE_URL}/api/invoices/${INVOICE_ID}/credit-note?companyId=${COMPANY_ID}")
+    
+    if echo "$CREDIT_NOTE_RESPONSE" | grep -q '"success" *: *true'; then
+        CREDIT_NOTE_ID=$(echo "$CREDIT_NOTE_RESPONSE" | grep -o '"Id" *: *"[^"]*"' | head -1 | sed 's/.*: *"//;s/".*//')
+        CREDIT_NOTE_TOTAL_RAW=$(echo "$CREDIT_NOTE_RESPONSE" | grep -o '"TotalAmt" *: *-[0-9.]*' | sed 's/.*: *//' | tr -d ' ')
+        if [ -z "$CREDIT_NOTE_TOTAL_RAW" ]; then
+            CREDIT_NOTE_TOTAL_RAW=$(echo "$CREDIT_NOTE_RESPONSE" | grep -o '"TotalAmt" *: *[0-9.]*' | sed 's/.*: *//' | tr -d ' ')
+        fi
+        CREDIT_NOTE_TOTAL=$(echo "$CREDIT_NOTE_TOTAL_RAW" | sed 's/^-//')
+        
+        echo "✓ Credit note created successfully:"
+        echo "  Credit Note ID: $CREDIT_NOTE_ID"
+        echo "  Credit Amount: \$${CREDIT_NOTE_TOTAL}"
+    else
+        echo "⚠ Warning: Failed to create credit note"
+        ERROR_MSG=$(echo "$CREDIT_NOTE_RESPONSE" | grep -o '"error":"[^"]*"' | cut -d'"' -f4)
+        if [ -n "$ERROR_MSG" ]; then
+            echo "  Error: $ERROR_MSG"
+        fi
+    fi
+    
 else
     echo "✗ Error: Failed to fetch updated invoice status"
     echo "$UPDATED_INVOICE_RESPONSE" | grep -o '"error":"[^"]*"' | cut -d'"' -f4 || echo "$UPDATED_INVOICE_RESPONSE"
@@ -157,6 +181,21 @@ echo "Payment Details"
 echo "=========================================="
 echo "Payment ID: $PAYMENT_ID"
 echo "Payment Amount: \$${PAYMENT_AMOUNT_APPLIED}"
+if [ -n "$CREDIT_NOTE_ID" ]; then
+    echo ""
+    echo "Credit Note Details:"
+    echo "  Credit Note ID: $CREDIT_NOTE_ID"
+    echo "  View credit note: ${BASE_URL}/api/credit-notes/${CREDIT_NOTE_ID}?companyId=${COMPANY_ID}"
+    echo "  List all credit notes: ${BASE_URL}/api/credit-notes?companyId=${COMPANY_ID}"
+fi
+echo ""
+echo "=========================================="
+echo "QuickBooks Portal Location"
+echo "=========================================="
+echo "To view credit notes in QuickBooks Online:"
+echo "  1. Go to Sales menu → Products and Services"
+echo "  2. Click on 'Credit Memos' tab"
+echo "  3. Or go to Sales → All Sales → Filter by 'Credit Memos'"
 echo ""
 echo "Done!"
 
