@@ -50,9 +50,14 @@ ASP.NET Core Minimal API for creating invoices and credit notes through QuickBoo
 - Create credit notes to cancel/adjust invoices
 - List all invoices and credit notes with summary statistics
 - Retrieve invoice and credit note details by ID
-- Apply payments to invoices and automatically create credit notes
+- Settle invoices using credit note + payment hybrid approach
 - Token refresh mechanism with persistent storage
 - Idempotency checks to prevent duplicate invoices
+- Health check endpoints (application and QuickBooks API connectivity)
+- Request validation middleware (automatic companyId and OAuth token validation)
+- Correlation ID tracking for better request traceability
+- Automatic retry logic with exponential backoff for transient failures
+- In-memory caching for customer lookups
 - Swagger UI documentation
 - Comprehensive shell scripts for easy testing
 
@@ -61,10 +66,6 @@ ASP.NET Core Minimal API for creating invoices and credit notes through QuickBoo
 - .NET 9.0 SDK or later
 - Intuit Developer account
 - QuickBooks Online sandbox company (for testing)
-- `jq` (optional but recommended) - For better JSON formatting in shell scripts
-  - Install on Linux: `apt-get update && apt-get install -y jq`
-  - Install on macOS: `brew install jq`
-  - Install on Windows: Download from [jq official site](https://stedolan.github.io/jq/download/)
 - `jq` (optional but recommended) - For better JSON formatting in shell scripts
   - Install on Linux: `apt-get update && apt-get install -y jq`
   - Install on macOS: `brew install jq`
@@ -78,7 +79,7 @@ test-intuint-invoicing-api/
 │   ├── AuthEndpoints.cs    # OAuth authentication endpoints
 │   ├── InvoiceEndpoints.cs # Invoice CRUD operations
 │   ├── CreditNoteEndpoints.cs # Credit note operations
-│   └── HealthEndpoints.cs  # Health check endpoint
+│   └── HealthEndpoints.cs  # Health check endpoints
 ├── Models/                 # Data models and DTOs
 │   ├── ApiResponse.cs      # Standard API response wrapper
 │   ├── InvoiceModels.cs    # Invoice and credit memo models
@@ -86,6 +87,14 @@ test-intuint-invoicing-api/
 ├── Services/                # Business logic services
 │   ├── IntuitOAuthService.cs    # OAuth 2.0 flow handling
 │   └── QuickBooksApiClient.cs   # QuickBooks API client
+├── Middleware/              # ASP.NET Core middleware
+│   ├── CorrelationIdMiddleware.cs    # Correlation ID tracking
+│   └── RequestValidationMiddleware.cs # Request validation
+├── Extensions/              # Extension methods
+│   ├── InvoiceExtensions.cs    # Invoice-related extensions
+│   └── LoggerExtensions.cs    # Structured logging extensions
+├── Helpers/                  # Helper utilities
+│   └── RetryHelper.cs        # Retry logic with exponential backoff
 ├── Program.cs              # Application entry point
 ├── appsettings.json        # Configuration (create from appsettings.json.example)
 ├── appsettings.json.example # Configuration template (copy to appsettings.json)
@@ -269,13 +278,28 @@ Content-Type: application/json
 
 ### Health Check
 
+#### Application Health
+
 ```bash
 curl -X GET http://localhost:5000/health
 ```
 
 **Note:** Use `http://localhost:5000` (HTTP), not HTTPS. No `-k` flag needed for HTTP.
 
-**Response:** `200 OK` with health status
+**Response:** `200 OK` with application health status
+
+#### QuickBooks API Health Check
+
+```bash
+curl -X GET "http://localhost:5000/health/quickbooks?companyId=YOUR_REALM_ID"
+```
+
+**Note:** 
+- Replace `YOUR_REALM_ID` with your company ID
+- This endpoint verifies QuickBooks API connectivity and token validity
+- Returns `200 OK` if healthy, `503 Service Unavailable` if there are issues
+
+**Response:** `200 OK` with QuickBooks API connectivity status, or `503` if unhealthy
 
 ### Authentication
 
@@ -303,6 +327,32 @@ curl -X POST http://localhost:5000/auth/refresh \
 **Response:** `200 OK` with new access and refresh tokens
 
 ### Invoices
+
+#### Settle Invoice (Credit Note + Payment)
+
+**Endpoint:** `POST /api/invoices/{invoiceId}/settle`
+
+```bash
+curl -X POST "http://localhost:5000/api/invoices/INVOICE_ID/settle?companyId=YOUR_REALM_ID" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Amount": 100.00,
+    "TxnDate": "2025-01-15",
+    "Description": "Invoice settlement"
+  }'
+```
+
+**Note:** Use `http://localhost:5000` (HTTP), not HTTPS.
+
+**Note:** 
+- Replace `INVOICE_ID` with the invoice ID you want to settle
+- Replace `YOUR_REALM_ID` with your company ID
+- `Amount` is optional - defaults to full invoice balance if not specified
+- `Description` is optional - automatically generated if not provided
+- This uses a hybrid approach: creates a credit memo, then a payment that applies it to the invoice
+- Invoice balance is reduced and marked as paid/partially paid
+
+**Response:** `201 Created` with credit memo details
 
 #### Create Invoice
 
@@ -367,7 +417,7 @@ curl -X GET "http://localhost:5000/api/credit-notes?companyId=YOUR_REALM_ID"
 
 **Note:** This endpoint retrieves all credit notes (credit memos) created in QuickBooks for the specified company.
 
-#### Create Credit Note (Cancel Invoice)
+#### Create Credit Note (Refund/Cancel Invoice)
 
 **Endpoint:** `POST /api/invoices/{invoiceId}/credit-note`
 
@@ -378,10 +428,18 @@ curl -X POST "http://localhost:5000/api/invoices/INVOICE_ID/credit-note?companyI
 **Note:** Use `http://localhost:5000` (HTTP), not HTTPS.
 
 **Note:** 
-- Replace `INVOICE_ID` with the invoice ID you want to cancel
+- Replace `INVOICE_ID` with the invoice ID you want to refund/cancel
 - Replace `YOUR_REALM_ID` with your company ID
-- This creates a credit memo matching the invoice amount, effectively canceling it
-- Can be created after invoice settlement (regardless of payment amount)
+- This creates a credit memo matching the invoice amount, effectively canceling/adjusting it
+- **Use this for refunds, cancellations, or adjustments** - NOT for normal payments
+- Can be created at any time (before or after payment)
+
+**When to use credit notes:**
+- Customer returns goods/services
+- Invoice needs to be cancelled
+- Refund is required
+- Pricing error correction
+- Post-invoice discount/credit adjustment
 
 **Response:** `201 Created` with credit memo details including the credit note ID
 
@@ -416,46 +474,7 @@ Credit notes (credit memos) can be viewed in QuickBooks Online through:
 
 ## Testing
 
-### Option 1: Using Postman (Recommended)
-
-Postman is easier for testing complex JSON requests. A comprehensive Postman collection is included in the project with proper payloads, examples, and automated scripts.
-
-1. **Import the Collection:**
-   - Open Postman
-   - Click **Import** → Select `Intuit-Invoicing-API.postman_collection.json`
-   - The collection will be imported with all endpoints pre-configured
-
-2. **Set Environment Variables:**
-   - After OAuth, copy your `realmId` (Company ID) from the callback URL
-   - In Postman, click on the collection → **Variables** tab
-   - Set `companyId` variable to your `realmId` (e.g., `9341455793300229`)
-   - The `baseUrl` is already set to `http://localhost:5000`
-   - All requests will automatically use these variables
-
-3. **Test Endpoints:**
-   - **Health Check**: Just click Send to verify API is running
-   - **OAuth - Authorize**: Open the URL in browser (not Postman) to complete OAuth flow
-   - **Create Invoice - Simple**: Pre-configured with proper payload, automatically sets dates
-   - **Create Invoice - Multiple Line Items**: Example with 3 line items
-   - **Create Invoice - With Custom DocNumber**: Example with custom invoice number
-   - **Get Invoice**: Uses `{{invoiceId}}` variable (automatically set after creating invoice)
-   - **Create Credit Note**: Uses `{{invoiceId}}` to cancel an invoice
-   - **Get Credit Note**: Uses `{{creditNoteId}}` variable (automatically set after creating credit note)
-
-**Features of the Postman Collection:**
-- ✅ **Proper payloads** matching exact API model structure
-- ✅ **Multiple examples** (simple, multiple items, custom doc number)
-- ✅ **Automated scripts** that set dynamic dates (today, due date)
-- ✅ **Auto-save IDs** - invoiceId and creditNoteId are automatically saved after creation
-- ✅ **Test assertions** - validates responses automatically
-- ✅ **Detailed descriptions** - explains each field and parameter
-- ✅ **Variable management** - easy to update companyId and reuse invoice IDs
-- ✅ **Syntax highlighting** - easy JSON editing
-- ✅ **Response formatting** - formatted JSON responses
-
-### Option 2: Using cURL
-
-## Testing with cURL
+### Option 1: Using cURL
 
 ### Quick Start Testing Flow
 
@@ -504,7 +523,7 @@ Postman is easier for testing complex JSON requests. A comprehensive Postman col
    curl -X POST "http://localhost:5000/api/invoices/INVOICE_ID/credit-note?companyId=YOUR_REALM_ID" | jq
    ```
 
-### Option 3: Using Shell Scripts
+### Option 2: Using Shell Scripts
 
 The project includes convenient shell scripts in the `scripts/` folder for common operations. All scripts support optional `jq` for enhanced JSON formatting.
 
@@ -631,10 +650,11 @@ The project includes convenient shell scripts in the `scripts/` folder for commo
 ```
 
 **Features:**
-- Applies payment to invoice
-- Verifies updated balance
-- Automatically creates credit note after settlement
+- Creates credit memo, then payment to apply it to invoice (hybrid approach)
+- Supports full and partial settlement
+- Verifies invoice balance reduction
 - Shows settlement status (fully paid or partially paid)
+- Includes description in credit memo for tracking
 
 #### Create Credit Note
 
@@ -695,6 +715,9 @@ dotnet test
 - **Endpoints**: Each endpoint group is in its own file under `Endpoints/`
 - **Services**: Business logic is separated into service classes
 - **Models**: DTOs and data models are in the `Models/` folder
+- **Middleware**: Request processing middleware (validation, correlation IDs)
+- **Extensions**: Extension methods for common operations
+- **Helpers**: Utility classes for retry logic and polling
 - **Comments**: Functions include inline comments explaining their purpose
 
 ### Adding New Endpoints
@@ -724,30 +747,51 @@ app.MapMyEndpoints();
 
 ## Architecture
 
+### Technical Features
+
+- **Retry Logic**: Automatic retry with exponential backoff for transient QuickBooks API failures (using Polly)
+- **Request Validation**: Middleware automatically validates `companyId` and OAuth tokens before processing
+- **Correlation IDs**: Every request gets a unique correlation ID for better traceability and debugging
+- **Customer Caching**: In-memory cache for customer lookups to reduce API calls
+- **Structured Logging**: Enhanced logging with correlation IDs for better request tracking
+- **Health Checks**: Application health and QuickBooks API connectivity monitoring
+- **Async Token Storage**: Non-blocking file I/O for OAuth token persistence
+
 ### OAuth Flow
 
 1. User initiates OAuth via `/auth/authorize`
 2. Redirected to Intuit for authorization
 3. Intuit redirects back with authorization code
 4. Code is exchanged for access/refresh tokens
-5. Tokens are stored in-memory (keyed by `realmId`)
+5. Tokens are stored in-memory and persisted to file (keyed by `realmId`)
+6. Tokens are automatically refreshed when expired
 
 ### API Request Flow
 
 1. Client sends request with `companyId` query parameter
-2. System retrieves stored tokens for that company
-3. Request is forwarded to QuickBooks API with Bearer token
-4. Response is returned to client
+2. **Correlation ID Middleware** adds a unique correlation ID to the request for traceability
+3. **Request Validation Middleware** validates `companyId` and checks for OAuth tokens
+4. System retrieves stored tokens for that company (with automatic refresh if expired)
+5. Request is forwarded to QuickBooks API with Bearer token (with automatic retry on transient failures)
+6. Response is returned to client with correlation ID in headers
 
-### Credit Note Creation
+### Invoice Settlement Flow (Standard Approach)
 
-When creating a credit note:
-1. Original invoice is fetched from QuickBooks
-2. Credit memo is created with matching line items (positive amounts - QuickBooks treats them as credits automatically)
-3. Credit memo effectively cancels the invoice
-4. Credit notes can be created after invoice settlement (regardless of payment amount)
+**Standard Settlement (`POST /api/invoices/{invoiceId}/settle`):**
+- Uses hybrid approach: credit memo + payment
+- Step 1: Creates a credit memo for the settlement amount
+- Step 2: Creates a payment that links both credit memo and invoice
+- Step 3: Payment applies the credit memo to the invoice
+- Invoice balance is reduced and marked as paid/partially paid
+- Includes description for tracking purposes
 
-**Note:** The `settle-invoice.sh` script automatically creates a credit note after applying a payment to an invoice, regardless of whether the invoice is fully or partially paid.
+**Credit Notes for Refunds/Cancellations (`POST /api/invoices/{invoiceId}/credit-note`):**
+- Use when customer returns goods/services
+- Use when invoice needs to be cancelled
+- Use when refund is required
+- Use for pricing error correction
+- Use for post-invoice discount/credit adjustment
+- **Note:** These credit notes are standalone and don't automatically reduce invoice balances
 
 ## Troubleshooting
 
@@ -923,6 +967,9 @@ We welcome contributions! Here's how to get started:
 - **Endpoints** go in `Endpoints/` folder - One file per endpoint group
 - **Services** go in `Services/` folder - Business logic and external API clients
 - **Models** go in `Models/` folder - DTOs and data models
+- **Middleware** go in `Middleware/` folder - Request processing middleware
+- **Extensions** go in `Extensions/` folder - Extension methods
+- **Helpers** go in `Helpers/` folder - Utility classes
 - **Scripts** go in `scripts/` folder - Shell scripts for testing and automation
 
 ### Before Submitting

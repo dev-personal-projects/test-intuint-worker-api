@@ -3,7 +3,10 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Polly;
+using Polly.Retry;
 using test_intuint_invoicing_api.Models;
 
 namespace test_intuint_invoicing_api.Services;
@@ -26,12 +29,40 @@ public class QuickBooksApiClient : IQuickBooksApiClient
 {
     private readonly IntuitSettings _settings;
     private readonly HttpClient _httpClient;
+    private readonly ILogger<QuickBooksApiClient> _logger;
+    private readonly AsyncRetryPolicy<HttpResponseMessage> _retryPolicy;
 
-    public QuickBooksApiClient(IOptions<IntuitSettings> settings, IHttpClientFactory httpClientFactory)
+    public QuickBooksApiClient(IOptions<IntuitSettings> settings, IHttpClientFactory httpClientFactory, ILogger<QuickBooksApiClient> logger)
     {
         // Initialize QuickBooks API client with configuration and HTTP client
         _settings = settings.Value;
-        _httpClient = httpClientFactory.CreateClient();
+        // Use named HttpClient "QuickBooks" which has timeout configured
+        _httpClient = httpClientFactory.CreateClient("QuickBooks");
+        _logger = logger;
+
+        // Configure retry policy for transient failures
+        // Retry on 5xx errors, timeouts, and network errors
+        _retryPolicy = Policy
+            .HandleResult<HttpResponseMessage>(response => 
+                (int)response.StatusCode >= 500 || response.StatusCode == System.Net.HttpStatusCode.RequestTimeout)
+            .Or<HttpRequestException>()
+            .Or<TaskCanceledException>()
+            .WaitAndRetryAsync(
+                retryCount: 3,
+                sleepDurationProvider: retryAttempt => TimeSpan.FromMilliseconds(200 * Math.Pow(2, retryAttempt - 1)),
+                onRetry: (outcome, timespan, retryCount, context) =>
+                {
+                    if (outcome.Result != null)
+                    {
+                        _logger.LogWarning("QuickBooks API call failed with status {StatusCode}. Retrying in {Delay}ms (attempt {RetryCount}/3)",
+                            outcome.Result.StatusCode, timespan.TotalMilliseconds, retryCount);
+                    }
+                    else if (outcome.Exception != null)
+                    {
+                        _logger.LogWarning(outcome.Exception, "QuickBooks API call failed with exception. Retrying in {Delay}ms (attempt {RetryCount}/3)",
+                            timespan.TotalMilliseconds, retryCount);
+                    }
+                });
     }
 
     public async Task<InvoiceEntity?> CreateInvoiceAsync(string companyId, string accessToken, InvoiceRequest request)
@@ -64,14 +95,18 @@ public class QuickBooksApiClient : IQuickBooksApiClient
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
         });
 
-        var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
+        // Execute with retry policy for transient failures
+        // Recreate HttpRequestMessage inside retry lambda to allow content stream to be read on each retry
+        var response = await _retryPolicy.ExecuteAsync(async () =>
         {
-            Content = new StringContent(json, Encoding.UTF8, "application/json")
-        };
-        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-        var response = await _httpClient.SendAsync(httpRequest);
+            var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            };
+            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            return await _httpClient.SendAsync(httpRequest);
+        });
         var content = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
@@ -91,7 +126,8 @@ public class QuickBooksApiClient : IQuickBooksApiClient
         httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-        var response = await _httpClient.SendAsync(httpRequest);
+        // Execute with retry policy for transient failures
+        var response = await _retryPolicy.ExecuteAsync(async () => await _httpClient.SendAsync(httpRequest));
         var content = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
@@ -117,7 +153,8 @@ public class QuickBooksApiClient : IQuickBooksApiClient
         httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-        var response = await _httpClient.SendAsync(httpRequest);
+        // Execute with retry policy for transient failures
+        var response = await _retryPolicy.ExecuteAsync(async () => await _httpClient.SendAsync(httpRequest));
         var content = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
@@ -138,14 +175,18 @@ public class QuickBooksApiClient : IQuickBooksApiClient
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
         });
 
-        var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
+        // Execute with retry policy for transient failures
+        // Recreate HttpRequestMessage inside retry lambda to allow content stream to be read on each retry
+        var response = await _retryPolicy.ExecuteAsync(async () =>
         {
-            Content = new StringContent(json, Encoding.UTF8, "application/json")
-        };
-        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-        var response = await _httpClient.SendAsync(httpRequest);
+            var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            };
+            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            return await _httpClient.SendAsync(httpRequest);
+        });
         var content = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
@@ -165,7 +206,8 @@ public class QuickBooksApiClient : IQuickBooksApiClient
         httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-        var response = await _httpClient.SendAsync(httpRequest);
+        // Execute with retry policy for transient failures
+        var response = await _retryPolicy.ExecuteAsync(async () => await _httpClient.SendAsync(httpRequest));
         var content = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
@@ -191,7 +233,8 @@ public class QuickBooksApiClient : IQuickBooksApiClient
         httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-        var response = await _httpClient.SendAsync(httpRequest);
+        // Execute with retry policy for transient failures
+        var response = await _retryPolicy.ExecuteAsync(async () => await _httpClient.SendAsync(httpRequest));
         var content = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
@@ -212,14 +255,18 @@ public class QuickBooksApiClient : IQuickBooksApiClient
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
         });
 
-        var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
+        // Execute with retry policy for transient failures
+        // Recreate HttpRequestMessage inside retry lambda to allow content stream to be read on each retry
+        var response = await _retryPolicy.ExecuteAsync(async () =>
         {
-            Content = new StringContent(json, Encoding.UTF8, "application/json")
-        };
-        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-        var response = await _httpClient.SendAsync(httpRequest);
+            var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            };
+            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            return await _httpClient.SendAsync(httpRequest);
+        });
         var content = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
@@ -241,7 +288,8 @@ public class QuickBooksApiClient : IQuickBooksApiClient
         httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-        var response = await _httpClient.SendAsync(httpRequest);
+        // Execute with retry policy for transient failures
+        var response = await _retryPolicy.ExecuteAsync(async () => await _httpClient.SendAsync(httpRequest));
         var content = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
@@ -260,14 +308,18 @@ public class QuickBooksApiClient : IQuickBooksApiClient
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
         });
 
-        var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
+        // Execute with retry policy for transient failures
+        // Recreate HttpRequestMessage inside retry lambda to allow content stream to be read on each retry
+        var response = await _retryPolicy.ExecuteAsync(async () =>
         {
-            Content = new StringContent(json, Encoding.UTF8, "application/json")
-        };
-        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-        var response = await _httpClient.SendAsync(httpRequest);
+            var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            };
+            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            return await _httpClient.SendAsync(httpRequest);
+        });
         var content = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
@@ -302,7 +354,8 @@ public class QuickBooksApiClient : IQuickBooksApiClient
         httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-        var response = await _httpClient.SendAsync(httpRequest);
+        // Execute with retry policy for transient failures
+        var response = await _retryPolicy.ExecuteAsync(async () => await _httpClient.SendAsync(httpRequest));
         var content = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)

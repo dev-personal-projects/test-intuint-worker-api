@@ -7,7 +7,7 @@
 
 # Configuration - Update these values based on your QuickBooks setup
 DEFAULT_COMPANY_ID="9341455793300229"
-DEFAULT_CUSTOMER_NAME="Shipht It Company"
+DEFAULT_CUSTOMER_NAME="Goodinfo Solutions tech test"
 BASE_URL="http://localhost:5000"
 
 # Get parameters or use defaults
@@ -59,7 +59,7 @@ curl -X POST "http://localhost:5000/api/invoices?companyId=${COMPANY_ID}&custome
         \"SalesItemLineDetail\": {
           \"ItemRef\": { \"value\": \"3\", \"name\": \"Cloud Hosting\" },
           \"Qty\": 1,
-          \"UnitPrice\": 1200.00
+          \"UnitPrice\": 1900.00
         }
       },
       {
@@ -68,7 +68,7 @@ curl -X POST "http://localhost:5000/api/invoices?companyId=${COMPANY_ID}&custome
         \"SalesItemLineDetail\": {
           \"ItemRef\": { \"value\": \"4\", \"name\": \"API Integration\" },
           \"Qty\": 25,
-          \"UnitPrice\": 100.00
+          \"UnitPrice\": 120.00
         }
       },
       {
@@ -86,7 +86,7 @@ curl -X POST "http://localhost:5000/api/invoices?companyId=${COMPANY_ID}&custome
         \"SalesItemLineDetail\": {
           \"ItemRef\": { \"value\": \"6\", \"name\": \"Database Services\" },
           \"Qty\": 6,
-          \"UnitPrice\": 150.00
+          \"UnitPrice\": 180.00
         }
       },
       {
@@ -113,7 +113,7 @@ curl -X POST "http://localhost:5000/api/invoices?companyId=${COMPANY_ID}&custome
         \"SalesItemLineDetail\": {
           \"ItemRef\": { \"value\": \"9\", \"name\": \"Mobile Development\" },
           \"Qty\": 8,
-          \"UnitPrice\": 100.00
+          \"UnitPrice\": 110.00
         }
       },
       {
@@ -122,7 +122,7 @@ curl -X POST "http://localhost:5000/api/invoices?companyId=${COMPANY_ID}&custome
         \"SalesItemLineDetail\": {
           \"ItemRef\": { \"value\": \"10\", \"name\": \"Design Services\" },
           \"Qty\": 15,
-          \"UnitPrice\": 30.00
+          \"UnitPrice\": 40.00
         }
       },
       {

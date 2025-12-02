@@ -1,4 +1,6 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using test_intuint_invoicing_api.Extensions;
 using test_intuint_invoicing_api.Models;
 using test_intuint_invoicing_api.Services;
 
@@ -65,32 +67,35 @@ public static class CreditNoteEndpoints
             // QuickBooks requires all amounts to be positive (0 or greater)
             // Credit memos are automatically treated as credits by QuickBooks
             // We use the same positive amounts as the invoice - QuickBooks handles the credit nature
+            var salesItemLines = invoice.Line?.GetSalesItemLineDetails() ?? new List<LineItem>();
+            
+            // Calculate Amount for each line item (Amount = UnitPrice * Qty)
+            var creditMemoLineItems = salesItemLines.Select(line =>
+            {
+                var unitPrice = line.SalesItemLineDetail!.UnitPrice ?? 0;
+                var qty = line.SalesItemLineDetail.Qty ?? 0;
+                var amount = unitPrice * qty;
+
+                return new LineItem
+                {
+                    DetailType = line.DetailType,
+                    // Amount is required by QuickBooks - calculate from UnitPrice * Qty
+                    Amount = amount > 0 ? amount : null,
+                    Description = line.Description,
+                    SalesItemLineDetail = new SalesItemLineDetail
+                    {
+                        ItemRef = line.SalesItemLineDetail.ItemRef,
+                        Qty = line.SalesItemLineDetail.Qty,
+                        UnitPrice = line.SalesItemLineDetail.UnitPrice
+                    }
+                };
+            }).ToList();
+
             var creditMemoRequest = new CreditMemoRequest
             {
                 CustomerRef = invoice.CustomerRef,
                 TxnDate = DateTime.Now.ToString("yyyy-MM-dd"),
-                Line = invoice.Line?.Where(line => line.DetailType == "SalesItemLineDetail" && line.SalesItemLineDetail != null)
-                    .Select(line =>
-                    {
-                        // Calculate Amount = UnitPrice * Qty (both positive - QuickBooks treats credit memos as credits)
-                        var unitPrice = line.SalesItemLineDetail!.UnitPrice ?? 0;
-                        var qty = line.SalesItemLineDetail.Qty ?? 0;
-                        var amount = unitPrice * qty;
-                        
-                        return new LineItem
-                        {
-                            DetailType = line.DetailType,
-                            // Amount is required by QuickBooks - calculate from UnitPrice * Qty
-                            Amount = amount > 0 ? amount : null,
-                            Description = line.Description,
-                            SalesItemLineDetail = new SalesItemLineDetail
-                            {
-                                ItemRef = line.SalesItemLineDetail.ItemRef,
-                                Qty = line.SalesItemLineDetail.Qty,
-                                UnitPrice = line.SalesItemLineDetail.UnitPrice
-                            }
-                        };
-                    }).ToList()
+                Line = creditMemoLineItems
             };
 
             // Log credit memo request details for debugging
@@ -182,11 +187,23 @@ public static class CreditNoteEndpoints
             logger.LogInformation("Retrieved {Count} credit memos for companyId: {CompanyId}", creditMemos.Count, companyId);
             return Results.Ok(ApiResponse<List<CreditMemoEntity>>.Ok(creditMemos));
         }
+        catch (HttpRequestException ex)
+        {
+            // Handle HTTP/API errors
+            logger.LogError(ex, "GetAllCreditNotes failed with HTTP error for companyId: {CompanyId}", companyId);
+            return Results.BadRequest(ApiResponse<object>.Fail($"QuickBooks API error: {ex.Message}"));
+        }
+        catch (JsonException ex)
+        {
+            // Handle JSON serialization/deserialization errors
+            logger.LogError(ex, "GetAllCreditNotes failed with JSON error for companyId: {CompanyId}", companyId);
+            return Results.BadRequest(ApiResponse<object>.Fail($"Invalid data format: {ex.Message}"));
+        }
         catch (Exception ex)
         {
-            // Return error if QuickBooks API call fails
-            logger.LogError(ex, "GetAllCreditNotes failed with exception for companyId: {CompanyId}", companyId);
-            return Results.BadRequest(ApiResponse<object>.Fail(ex.Message));
+            // Handle unexpected errors
+            logger.LogError(ex, "GetAllCreditNotes failed with unexpected error for companyId: {CompanyId}", companyId);
+            return Results.BadRequest(ApiResponse<object>.Fail($"An unexpected error occurred: {ex.Message}"));
         }
     }
 }

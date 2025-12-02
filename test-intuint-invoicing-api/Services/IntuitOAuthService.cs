@@ -65,6 +65,7 @@ public class IntuitOAuthService : IIntuitOAuthService
             new KeyValuePair<string, string>("redirect_uri", _settings.RedirectUri)
         });
 
+        // OAuth token exchange - use retry for transient failures
         var response = await _httpClient.SendAsync(request);
         var content = await response.Content.ReadAsStringAsync();
 
@@ -97,6 +98,7 @@ public class IntuitOAuthService : IIntuitOAuthService
             new KeyValuePair<string, string>("refresh_token", refreshToken)
         });
 
+        // OAuth token exchange - use retry for transient failures
         var response = await _httpClient.SendAsync(request);
         var content = await response.Content.ReadAsStringAsync();
 
@@ -116,11 +118,17 @@ public class IntuitOAuthService : IIntuitOAuthService
     public void StoreTokens(string realmId, TokenResponse tokens)
     {
         // Store OAuth tokens in memory and persist to file, keyed by company ID (realmId)
+        Dictionary<string, TokenResponse> tokenStoreSnapshot;
         lock (_lockObject)
         {
             _tokenStore[realmId] = tokens;
-            SaveTokensToFile();
+            // Create a snapshot of the token store while lock is held to avoid race conditions
+            tokenStoreSnapshot = new Dictionary<string, TokenResponse>(_tokenStore);
         }
+        
+        // Fire and forget async file save to avoid blocking
+        // Use snapshot to prevent race conditions with concurrent modifications
+        _ = Task.Run(async () => await SaveTokensToFileAsync(tokenStoreSnapshot));
     }
 
     public TokenResponse? GetTokens(string realmId)
@@ -194,21 +202,24 @@ public class IntuitOAuthService : IIntuitOAuthService
         }
     }
 
-    private void SaveTokensToFile()
+    private async Task SaveTokensToFileAsync(Dictionary<string, TokenResponse> tokenStoreSnapshot)
     {
-        // Save tokens to persistent storage file
+        // Save tokens to persistent storage file asynchronously
+        // Uses a snapshot of the token store to avoid race conditions
         try
         {
-            var json = JsonSerializer.Serialize(_tokenStore, new JsonSerializerOptions 
+            var json = JsonSerializer.Serialize(tokenStoreSnapshot, new JsonSerializerOptions 
             { 
                 WriteIndented = true 
             });
-            File.WriteAllText(_tokensFilePath, json);
+            await File.WriteAllTextAsync(_tokensFilePath, json);
         }
-        catch
+        catch (Exception)
         {
             // If file write fails, continue with in-memory storage only
             // This is acceptable for development
+            // Note: We can't use ILogger here as this is a fire-and-forget operation
+            // In production, consider using a proper logging mechanism
         }
     }
 }

@@ -35,6 +35,9 @@ public class CreditMemoRequest
 
     [JsonPropertyName("TxnDate")]
     public string? TxnDate { get; set; }
+
+    [JsonPropertyName("PrivateNote")]
+    public string? PrivateNote { get; set; }
 }
 
 // Line item model for invoice and credit memo line entries
@@ -262,6 +265,19 @@ public class LinkedTransaction
 
     [JsonPropertyName("TxnType")]
     public string? TxnType { get; set; }
+}
+
+// Request model for invoice settlement (credit note + payment)
+public class SettlementRequest
+{
+    [JsonPropertyName("Amount")]
+    public decimal? Amount { get; set; }
+
+    [JsonPropertyName("TxnDate")]
+    public string? TxnDate { get; set; }
+
+    [JsonPropertyName("Description")]
+    public string? Description { get; set; }
 }
 
 // Payment entity returned from QuickBooks API
