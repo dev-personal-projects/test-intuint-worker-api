@@ -1,0 +1,9 @@
+{
+    "editor.wordWrap": "on",
+
+    "workbench.colorCustomizations": {
+        "terminal.foreground": "#126228"
+    },
+    "editor.fontSize": 12,
+    "workbench.preferredDarkColorTheme": "One Dark Pro Night Flat"
+}
